@@ -1,0 +1,24 @@
+/* src/components/Navigation/BreadcrumbNav.css */
+.breadcrumb-navigation {
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 15px;
+}
+
+.clickable-crumb {
+  cursor: pointer;
+}
+
+.clickable-crumb:hover {
+  text-decoration: underline;
+  color: #007bff;
+}
+
+.active-crumb {
+  font-weight: bold;
+}
+
+.breadcrumb-item+.breadcrumb-item::before {
+  content: ">";
+}

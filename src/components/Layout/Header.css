@@ -1,0 +1,8 @@
+/* src/components/Layout/Header.css */
+.navbar-brand {
+  font-weight: 600;
+}
+
+.btn-upload {
+  margin-right: 10px;
+}

@@ -1,0 +1,13 @@
+/* src/components/FileUpload/FileUpload.css */
+.upload-modal .form-group {
+  margin-bottom: 1rem;
+}
+
+.file-info {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.btn-process {
+  min-width: 120px;
+}
