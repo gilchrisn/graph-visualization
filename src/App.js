@@ -1,25 +1,25 @@
+// src/App.js - Refactored with new architecture
+
 import React from 'react';
 import { Container } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './App.css';
 
 import Header from './components/Layout/Header';
-import GraphVisualization from './components/GraphVisualization/GraphVisualization';
-import { GraphProvider } from './context/GraphContext';
+import ModeContainer from './modes/ModeContainer';
+import { AppStateProvider } from './core/AppStateManager';
 
-import MouseEventTest from './components/Debug/MouseEventTest';
 
 function App() {
   return (
-    <GraphProvider>
+    <AppStateProvider>
       <div className="App">
         <Header />
         <Container fluid className="main-container">
-          <GraphVisualization />
+          <ModeContainer />
         </Container>
       </div>
-      <MouseEventTest />
-    </GraphProvider>
+    </AppStateProvider>
   );
 }
 

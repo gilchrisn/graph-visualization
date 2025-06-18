@@ -1,35 +1,63 @@
 import React, { useState } from 'react';
-import { Card, Button, Tabs, Tab, Table, Badge, ProgressBar } from 'react-bootstrap';
-import { useGraph } from '../../context/GraphContext';
+import { Card, Button, Tabs, Tab, Table, Badge, ProgressBar, Alert } from 'react-bootstrap';
+import { useAppState, useVisualizationState, useDataState } from '../../core/AppStateManager';
+import DataService from '../../core/DataService';
+import AlgorithmRegistry from '../../core/AlgorithmRegistry';
 import './NodeInfoPanel.css';
 
-const NodeInfoPanel = ({ loadSupernodeData }) => {
-  const { 
-    selectedNode, 
-    nodeStatistics, 
-    currentSupernode,
-    breadcrumbPath,
-    setBreadcrumbPath,
-    setCurrentSupernode,
-    dataset,
-    k
-  } = useGraph();
-
+const NodeInfoPanel = ({ 
+  selectedNode: propSelectedNode = null,
+  onSupernodeNavigation = null
+}) => {
+  const { actions } = useAppState();
+  const { selectedNode: stateSelectedNode, nodeStatistics, breadcrumbPath } = useVisualizationState();
+  const { dataset, algorithm } = useDataState();
+  
+  // Use prop selectedNode if provided, otherwise use from state
+  const selectedNode = propSelectedNode || stateSelectedNode;
+  
   const [activeTab, setActiveTab] = useState('basic');
+  const [loadingStats, setLoadingStats] = useState(false);
 
   // Navigate to a supernode
-  const navigateToSupernode = (supernodeId) => {
+  const navigateToSupernode = async (supernodeId) => {
     if (!supernodeId) return;
     
-    setCurrentSupernode(supernodeId);
+    // If external navigation handler provided, use it
+    if (onSupernodeNavigation) {
+      onSupernodeNavigation(supernodeId);
+      return;
+    }
+    
+    // Otherwise, use internal state management
+    actions.setCurrentSupernode(supernodeId);
     
     // Update the breadcrumb path
     const newBreadcrumb = { id: supernodeId, label: supernodeId };
-    setBreadcrumbPath([...breadcrumbPath, newBreadcrumb]);
+    actions.setBreadcrumbPath([...breadcrumbPath, newBreadcrumb]);
     
-    // Load the supernode data using the passed function
-    if (dataset && supernodeId) {
-      loadSupernodeData(supernodeId);
+    // Load node statistics
+    await loadNodeStatistics(supernodeId);
+  };
+
+  // Load node statistics
+  const loadNodeStatistics = async (nodeId) => {
+    if (!dataset || !nodeId) return;
+    
+    setLoadingStats(true);
+    try {
+      const algorithmConfig = AlgorithmRegistry.getAlgorithm(algorithm);
+      const parameters = algorithmConfig.getDefaultParameters(); // This should come from current state
+      
+      const response = await DataService.getNodeStatistics(algorithm, dataset, nodeId, parameters);
+      
+      if (response.success) {
+        actions.setNodeStatistics(response.statistics);
+      }
+    } catch (err) {
+      console.error('Error loading node statistics:', err);
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -50,12 +78,23 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
     return 'secondary';                 // Low importance
   };
 
+  // Get node type badge variant
+  const getNodeTypeBadge = (type) => {
+    switch (type) {
+      case 'leaf': return 'success';
+      case 'supernode': return 'primary';
+      default: return 'secondary';
+    }
+  };
+
   if (!selectedNode) {
     return (
       <Card className="node-info-panel">
         <Card.Header>Node Information</Card.Header>
         <Card.Body>
-          <p className="text-muted">Select a node to view details</p>
+          <Alert variant="info" className="mb-0">
+            <small>Select a node to view details</small>
+          </Alert>
         </Card.Body>
       </Card>
     );
@@ -66,7 +105,7 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
       <Card.Header>
         <div className="d-flex justify-content-between align-items-center">
           <span>Node Information</span>
-          <Badge bg={selectedNode.type === 'leaf' ? 'success' : 'primary'}>
+          <Badge bg={getNodeTypeBadge(selectedNode.type)}>
             {selectedNode.type || 'Unknown'}
           </Badge>
         </div>
@@ -80,24 +119,44 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
           {/* Basic Information Tab */}
           <Tab eventKey="basic" title="Basic">
             <div className="basic-info">
-              <p><strong>ID:</strong> {selectedNode.id}</p>
-              <p><strong>Label:</strong> {selectedNode.label || selectedNode.id}</p>
-              <p><strong>Size/Radius:</strong> {formatNumber(selectedNode.size)}</p>
+              <Table size="sm" className="mb-3">
+                <tbody>
+                  <tr>
+                    <td><strong>ID:</strong></td>
+                    <td><code>{selectedNode.id}</code></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Label:</strong></td>
+                    <td>{selectedNode.label || selectedNode.id}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Type:</strong></td>
+                    <td>
+                      <Badge bg={getNodeTypeBadge(selectedNode.type)}>
+                        {selectedNode.type || 'Unknown'}
+                      </Badge>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Size/Radius:</strong></td>
+                    <td>{formatNumber(selectedNode.size)}</td>
+                  </tr>
+                </tbody>
+              </Table>
               
               {/* PPRviz-specific metadata */}
               {selectedNode.metadata && (
                 <>
-                  <hr />
-                  <h6>PPRviz Metadata</h6>
+                  <h6 className="border-bottom pb-1">PPRviz Metadata</h6>
                   
-                  {selectedNode.metadata.degree !== null && (
+                  {selectedNode.metadata.degree !== null && selectedNode.metadata.degree !== undefined && (
                     <p><strong>Degree:</strong> {formatNumber(selectedNode.metadata.degree)}</p>
                   )}
                   
-                  {selectedNode.metadata.dpr !== null && (
-                    <div className="mb-2">
+                  {selectedNode.metadata.dpr !== null && selectedNode.metadata.dpr !== undefined && (
+                    <div className="mb-3">
                       <strong>DPR (Importance):</strong>
-                      <div className="d-flex align-items-center mt-1">
+                      <div className="d-flex align-items-center mt-2">
                         <Badge bg={getDprColor(selectedNode.metadata.dpr)} className="me-2">
                           {formatNumber(selectedNode.metadata.dpr)}
                         </Badge>
@@ -107,41 +166,62 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
                           variant={getDprColor(selectedNode.metadata.dpr)}
                         />
                       </div>
+                      <small className="text-muted">Higher values indicate more important nodes</small>
                     </div>
                   )}
                   
-                  {selectedNode.metadata.leafCount !== null && (
+                  {selectedNode.metadata.leafCount !== null && selectedNode.metadata.leafCount !== undefined && (
                     <p><strong>Leaf Count:</strong> {selectedNode.metadata.leafCount}</p>
                   )}
                 </>
               )}
               
-              {/* Traditional statistics from backend */}
+              {/* Backend statistics */}
               {nodeStatistics && (
                 <>
-                  <hr />
-                  <h6>Graph Statistics</h6>
-                  <p><strong>Total Degree:</strong> {nodeStatistics.degree}</p>
-                  <p><strong>In-Degree:</strong> {nodeStatistics.inDegree}</p>
-                  <p><strong>Out-Degree:</strong> {nodeStatistics.outDegree}</p>
-                  
-                  {/* {nodeStatistics.children !== undefined && (
-                    <>
-                      <p><strong>Children:</strong> {nodeStatistics.children}</p>
-                      <p><strong>Leaf Nodes:</strong> {nodeStatistics.leafNodes}</p>
-                    </>
-                  )} */}
-                  
-                  {nodeStatistics.averageDegree && (
-                    <p><strong>Avg Degree:</strong> {formatNumber(nodeStatistics.averageDegree)}</p>
-                  )}
-                  
-                  {nodeStatistics.averageDpr && (
-                    <p><strong>Avg DPR:</strong> {formatNumber(nodeStatistics.averageDpr)}</p>
-                  )}
-                  
-                  {nodeStatistics.level && (
-                    <p><strong>Level:</strong> {nodeStatistics.level}</p>
+                  <h6 className="border-bottom pb-1 mt-3">Graph Statistics</h6>
+                  {loadingStats ? (
+                    <div className="text-center py-2">
+                      <small className="text-muted">Loading statistics...</small>
+                    </div>
+                  ) : (
+                    <Table size="sm">
+                      <tbody>
+                        <tr>
+                          <td><strong>Total Degree:</strong></td>
+                          <td>{nodeStatistics.degree}</td>
+                        </tr>
+                        <tr>
+                          <td><strong>In-Degree:</strong></td>
+                          <td>{nodeStatistics.inDegree}</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Out-Degree:</strong></td>
+                          <td>{nodeStatistics.outDegree}</td>
+                        </tr>
+                        
+                        {nodeStatistics.averageDegree && (
+                          <tr>
+                            <td><strong>Avg Degree:</strong></td>
+                            <td>{formatNumber(nodeStatistics.averageDegree)}</td>
+                          </tr>
+                        )}
+                        
+                        {nodeStatistics.averageDpr && (
+                          <tr>
+                            <td><strong>Avg DPR:</strong></td>
+                            <td>{formatNumber(nodeStatistics.averageDpr)}</td>
+                          </tr>
+                        )}
+                        
+                        {nodeStatistics.level && (
+                          <tr>
+                            <td><strong>Level:</strong></td>
+                            <td>{nodeStatistics.level}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </Table>
                   )}
                 </>
               )}
@@ -154,18 +234,28 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
               <div className="leaf-details">
                 <h6>Original Leaf Node</h6>
                 
-                {selectedNode.metadata.actualLeafId !== null && (
-                  <p><strong>Actual Leaf ID:</strong> {selectedNode.metadata.actualLeafId}</p>
-                )}
+                <Table size="sm" className="mb-3">
+                  <tbody>
+                    {selectedNode.metadata.actualLeafId !== null && selectedNode.metadata.actualLeafId !== undefined && (
+                      <tr>
+                        <td><strong>Actual Leaf ID:</strong></td>
+                        <td><code>{selectedNode.metadata.actualLeafId}</code></td>
+                      </tr>
+                    )}
+                    
+                    {selectedNode.metadata.leafDegree !== null && selectedNode.metadata.leafDegree !== undefined && (
+                      <tr>
+                        <td><strong>Original Degree:</strong></td>
+                        <td>{selectedNode.metadata.leafDegree}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </Table>
                 
-                {selectedNode.metadata.leafDegree !== null && (
-                  <p><strong>Original Degree:</strong> {selectedNode.metadata.leafDegree}</p>
-                )}
-                
-                {selectedNode.metadata.leafDpr !== null && (
-                  <div className="mb-2">
+                {selectedNode.metadata.leafDpr !== null && selectedNode.metadata.leafDpr !== undefined && (
+                  <div className="mb-3">
                     <strong>Original DPR:</strong>
-                    <div className="d-flex align-items-center mt-1">
+                    <div className="d-flex align-items-center mt-2">
                       <Badge bg={getDprColor(selectedNode.metadata.leafDpr)} className="me-2">
                         {formatNumber(selectedNode.metadata.leafDpr)}
                       </Badge>
@@ -176,10 +266,11 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
                   </div>
                 )}
                 
-                <hr />
-                <small className="text-muted">
-                  This leaf node represents an actual node from the original graph dataset.
-                </small>
+                <Alert variant="info" className="mt-3">
+                  <small>
+                    This leaf node represents an actual node from the original graph dataset.
+                  </small>
+                </Alert>
               </div>
             </Tab>
           )}
@@ -215,18 +306,30 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
                   </div>
                 )}
                 
-                <Button 
-                  variant="primary" 
-                  className="w-100"
-                  onClick={() => navigateToSupernode(selectedNode.id)}
-                >
-                  🔍 Explore Supernode
-                </Button>
+                <div className="d-grid gap-2">
+                  <Button 
+                    variant="primary" 
+                    onClick={() => navigateToSupernode(selectedNode.id)}
+                    disabled={!dataset}
+                  >
+                    🔍 Explore Supernode
+                  </Button>
+                  
+                  <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    onClick={() => loadNodeStatistics(selectedNode.id)}
+                    disabled={loadingStats || !dataset}
+                  >
+                    {loadingStats ? 'Loading...' : '🔄 Refresh Statistics'}
+                  </Button>
+                </div>
                 
-                <hr />
-                <small className="text-muted">
-                  Click to dive deeper into this part of the graph hierarchy.
-                </small>
+                <Alert variant="success" className="mt-3">
+                  <small>
+                    Click "Explore Supernode" to dive deeper into this part of the graph hierarchy.
+                  </small>
+                </Alert>
               </div>
             </Tab>
           )}
@@ -234,9 +337,9 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
           {/* Advanced/Debug Tab */}
           <Tab eventKey="advanced" title="Advanced">
             <div className="advanced-info">
-              <h6>Raw Data</h6>
+              <h6>Position & Rendering</h6>
               
-              <Table size="sm" className="mt-2">
+              <Table size="sm" className="mb-3">
                 <tbody>
                   <tr>
                     <td><strong>Position X:</strong></td>
@@ -248,7 +351,11 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
                   </tr>
                   <tr>
                     <td><strong>CSS Classes:</strong></td>
-                    <td>{selectedNode.classes || 'default'}</td>
+                    <td><code>{selectedNode.classes || 'default'}</code></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Element ID:</strong></td>
+                    <td><code>{selectedNode.data?.id || selectedNode.id}</code></td>
                   </tr>
                 </tbody>
               </Table>
@@ -256,8 +363,27 @@ const NodeInfoPanel = ({ loadSupernodeData }) => {
               {selectedNode.metadata && (
                 <>
                   <h6 className="mt-3">Metadata Object</h6>
-                  <pre className="bg-light p-2 small" style={{ fontSize: '10px', maxHeight: '150px', overflow: 'auto' }}>
+                  <pre className="bg-light p-2 small" style={{ 
+                    fontSize: '10px', 
+                    maxHeight: '200px', 
+                    overflow: 'auto',
+                    borderRadius: '4px'
+                  }}>
                     {JSON.stringify(selectedNode.metadata, null, 2)}
+                  </pre>
+                </>
+              )}
+
+              {selectedNode.data && (
+                <>
+                  <h6 className="mt-3">Full Data Object</h6>
+                  <pre className="bg-light p-2 small" style={{ 
+                    fontSize: '10px', 
+                    maxHeight: '200px', 
+                    overflow: 'auto',
+                    borderRadius: '4px'
+                  }}>
+                    {JSON.stringify(selectedNode.data, null, 2)}
                   </pre>
                 </>
               )}

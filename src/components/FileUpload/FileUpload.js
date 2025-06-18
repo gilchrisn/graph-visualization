@@ -1,278 +1,301 @@
-// src/components/FileUpload/FileUpload.js - Updated to support heterogeneous and SCAR processing
 import React, { useState } from 'react';
-import { Button, Modal, Form, Alert, Spinner, Card, Row, Col, Badge } from 'react-bootstrap';
-import { useGraph } from '../../context/GraphContext';
-import api from '../../services/api';
+import { Button, ButtonGroup, Modal, Form, Alert, Spinner, Card, Row, Col, Badge } from 'react-bootstrap';
+import { useAppState, useLoadingState } from '../../core/AppStateManager';
+import DataService from '../../core/DataService';
+import AlgorithmRegistry from '../../core/AlgorithmRegistry';
 import './FileUpload.css';
 
 const FileUpload = () => {
-  const {
-    setLoading,
-    setError,
-    setDataset,
-    setFileUploaded,
-    setEdgeListFile,
-    setAttributesFile,
-    setCurrentSupernode,
-    setBreadcrumbPath,
-    k,
-    setK,
-    setProcessingStep,
-    setHierarchyData,
-    setMappingData,
-    setProcessingType,
-    processingType
-  } = useGraph();
-
+  const { actions } = useAppState();
+  const { loading } = useLoadingState();
+  
+  // Modal state
   const [showModal, setShowModal] = useState(false);
-  const [localProcessingType, setLocalProcessingType] = useState(processingType || 'homogeneous');
+  const [uploadMode, setUploadMode] = useState('single'); // 'single' or 'compare'
   
-  // Homogeneous files
-  const [localEdgeListFile, setLocalEdgeListFile] = useState(null);
-  const [localAttributesFile, setLocalAttributesFile] = useState(null);
-  
-  // Heterogeneous/SCAR files (4 files with specific naming)
-  const [localInfoFile, setLocalInfoFile] = useState(null);
-  const [localLinkFile, setLocalLinkFile] = useState(null);
-  const [localNodeFile, setLocalNodeFile] = useState(null);
-  const [localMetaFile, setLocalMetaFile] = useState(null);
-  
-  const [localK, setLocalK] = useState(k);
-  const [localNk, setLocalNk] = useState(10); // SCAR specific
-  const [localTh, setLocalTh] = useState(0.5); // SCAR specific
-  const [uploadError, setUploadError] = useState(null);
+  // Algorithm and files state
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('homogeneous');
+  const [files, setFiles] = useState({});
+  const [error, setError] = useState(null);
   const [processing, setProcessing] = useState(false);
+  
+  // Parameters state
+  const [parameters, setParameters] = useState(
+    AlgorithmRegistry.getDefaultParameters('homogeneous')
+  );
+  
+  // Comparison mode parameters
+  const [comparisonParams, setComparisonParams] = useState({
+    heterogeneous: AlgorithmRegistry.getDefaultParameters('heterogeneous'),
+    scar: AlgorithmRegistry.getDefaultParameters('scar')
+  });
 
+  // Get available algorithms from registry
+  const availableAlgorithms = AlgorithmRegistry.getAllAlgorithms();
+  const currentAlgorithm = AlgorithmRegistry.getAlgorithm(selectedAlgorithm);
+  const comparisonAlgorithms = AlgorithmRegistry.getComparisonAlgorithms();
+
+  // Handle modal open/close
   const handleShowModal = () => setShowModal(true);
   const handleCloseModal = () => {
     setShowModal(false);
-    setUploadError(null);
-    // Reset all files
-    setLocalEdgeListFile(null);
-    setLocalAttributesFile(null);
-    setLocalInfoFile(null);
-    setLocalLinkFile(null);
-    setLocalNodeFile(null);
-    setLocalMetaFile(null);
+    setError(null);
+    setFiles({});
+    setUploadMode('single');
+    setSelectedAlgorithm('homogeneous');
+    setParameters(AlgorithmRegistry.getDefaultParameters('homogeneous'));
   };
 
-  const handleProcessingTypeChange = (e) => {
-    const newType = e.target.value;
-    setLocalProcessingType(newType);
-    setUploadError(null);
+  // Handle upload mode change
+  const handleUploadModeChange = (mode) => {
+    setUploadMode(mode);
+    setError(null);
+    setFiles({});
     
-    // Reset all files when switching types
-    setLocalEdgeListFile(null);
-    setLocalAttributesFile(null);
-    setLocalInfoFile(null);
-    setLocalLinkFile(null);
-    setLocalNodeFile(null);
-    setLocalMetaFile(null);
-  };
-
-  // File change handlers
-  const handleEdgeListChange = (e) => setLocalEdgeListFile(e.target.files[0]);
-  const handleAttributesChange = (e) => setLocalAttributesFile(e.target.files[0]);
-  const handleInfoFileChange = (e) => setLocalInfoFile(e.target.files[0]);
-  const handleLinkFileChange = (e) => setLocalLinkFile(e.target.files[0]);
-  const handleNodeFileChange = (e) => setLocalNodeFile(e.target.files[0]);
-  const handleMetaFileChange = (e) => setLocalMetaFile(e.target.files[0]);
-
-  const handleKChange = (e) => {
-    const newK = parseInt(e.target.value, 10);
-    if (!isNaN(newK) && newK > 0) {
-      setLocalK(newK);
+    if (mode === 'single') {
+      setSelectedAlgorithm('homogeneous');
+      setParameters(AlgorithmRegistry.getDefaultParameters('homogeneous'));
     }
   };
 
-  const handleNkChange = (e) => {
-    const newNk = parseInt(e.target.value, 10);
-    if (!isNaN(newNk) && newNk > 0) {
-      setLocalNk(newNk);
-    }
+  // Handle algorithm selection (single mode only)
+  const handleAlgorithmChange = (algorithmId) => {
+    setSelectedAlgorithm(algorithmId);
+    setFiles({});
+    setParameters(AlgorithmRegistry.getDefaultParameters(algorithmId));
+    setError(null);
   };
 
-  const handleThChange = (e) => {
-    const newTh = parseFloat(e.target.value);
-    if (!isNaN(newTh) && newTh >= 0 && newTh <= 1) {
-      setLocalTh(newTh);
-    }
+  // Handle file changes
+  const handleFileChange = (fileType, file) => {
+    setFiles(prev => ({ ...prev, [fileType]: file }));
+    setError(null);
   };
 
-  // Validation functions
-  const validateHomogeneousFiles = () => {
-    if (!localEdgeListFile || !localAttributesFile) {
-      setUploadError('Please upload both the edge list and attributes files.');
-      return false;
-    }
-    return true;
+  // Handle parameter changes (single mode)
+  const handleParameterChange = (paramId, value) => {
+    setParameters(prev => ({ ...prev, [paramId]: value }));
   };
 
-  const validateHeterogeneousFiles = () => {
-    if (!localInfoFile || !localLinkFile || !localNodeFile || !localMetaFile) {
-      setUploadError('Please upload all 4 required files: info, link, node, and meta files.');
-      return false;
-    }
-    
-    // Extract dataset name from one of the files and validate naming
-    const infoFileName = localInfoFile.name;
-    const expectedDatasetName = infoFileName.replace('_info.dat', '');
-    
-    const expectedFiles = {
-      info: `${expectedDatasetName}_info.dat`,
-      link: `${expectedDatasetName}_link.dat`,
-      node: `${expectedDatasetName}_node.dat`,
-      meta: `${expectedDatasetName}_meta.dat`
-    };
-    
-    const actualFiles = {
-      info: localInfoFile.name,
-      link: localLinkFile.name,
-      node: localNodeFile.name,
-      meta: localMetaFile.name
-    };
-    
-    for (const [type, expectedName] of Object.entries(expectedFiles)) {
-      if (actualFiles[type] !== expectedName) {
-        setUploadError(`File naming mismatch for ${type} file. Expected: ${expectedName}, got: ${actualFiles[type]}`);
-        return false;
+  // Handle comparison parameter changes
+  const handleComparisonParameterChange = (algorithm, paramId, value) => {
+    setComparisonParams(prev => ({
+      ...prev,
+      [algorithm]: {
+        ...prev[algorithm],
+        [paramId]: value
       }
-    }
-    
-    return true;
+    }));
   };
 
-  const processFiles = async () => {
+  // Generate file input fields dynamically from algorithm config
+  const renderFileInputs = (algorithm) => {
+    return algorithm.fileRequirements.types.map(fileType => {
+      const fieldName = `${fileType}File`;
+      
+      return (
+        <Form.Group key={fileType} className="mb-3">
+          <Form.Label>
+            {fileType.charAt(0).toUpperCase() + fileType.slice(1)} File
+            {algorithm.fileRequirements.naming && (
+              <small className="text-muted ms-2">(*_{fileType}.{algorithm.fileRequirements.extensions[0].replace('.', '')})</small>
+            )}
+          </Form.Label>
+          <Form.Control
+            type="file"
+            accept={algorithm.fileRequirements.extensions.join(',')}
+            onChange={(e) => handleFileChange(fieldName, e.target.files[0])}
+          />
+          <Form.Text className="text-muted">
+            {algorithm.fileRequirements.descriptions[fileType]}
+          </Form.Text>
+        </Form.Group>
+      );
+    });
+  };
+
+  // Generate parameter inputs dynamically from algorithm schema
+  const renderParameterInputs = (algorithm, currentParams, onParamChange) => {
+    return algorithm.parameterSchema.map(param => (
+      <Form.Group key={param.id} className="mb-3">
+        <Form.Label>{param.name}</Form.Label>
+        {param.type === 'number' ? (
+          <Form.Control
+            type="number"
+            value={currentParams[param.id] || param.default}
+            min={param.min}
+            max={param.max}
+            onChange={(e) => onParamChange(param.id, parseInt(e.target.value) || param.default)}
+          />
+        ) : param.type === 'range' ? (
+          <>
+            <Form.Range
+              min={param.min}
+              max={param.max}
+              step={param.step}
+              value={currentParams[param.id] || param.default}
+              onChange={(e) => onParamChange(param.id, parseFloat(e.target.value))}
+            />
+            <Form.Text className="text-muted">
+              Current value: {currentParams[param.id] || param.default}
+            </Form.Text>
+          </>
+        ) : null}
+        <Form.Text className="text-muted">{param.description}</Form.Text>
+      </Form.Group>
+    ));
+  };
+
+  // Check if files are ready for processing
+  const areFilesReady = () => {
+    if (uploadMode === 'compare') {
+      // For comparison, need the 4 heterogeneous/SCAR files
+      const required = ['infoFile', 'linkFile', 'nodeFile', 'metaFile'];
+      return required.every(fileType => files[fileType]);
+    } else {
+      // For single mode, check based on selected algorithm
+      const requiredTypes = currentAlgorithm.fileRequirements.types;
+      return requiredTypes.every(type => files[`${type}File`]);
+    }
+  };
+
+  // Process files for single algorithm mode
+  const processSingleMode = async () => {
     setProcessing(true);
-    setUploadError(null);
+    setError(null);
 
     try {
-      // Set the processing type in global context
-      setProcessingType(localProcessingType);
-      setK(localK);
-
-      let uploadResult, processResult, datasetId;
-
-      if (localProcessingType === 'homogeneous') {
-        // Validate homogeneous files
-        if (!validateHomogeneousFiles()) {
-          setProcessing(false);
-          return;
-        }
-
-        // Set files in global context
-        setEdgeListFile(localEdgeListFile);
-        setAttributesFile(localAttributesFile);
-
-        // Step 1: Upload homogeneous files
-        setProcessingStep('Uploading homogeneous files...');
-        uploadResult = await api.uploadFiles(localEdgeListFile, localAttributesFile, localK);
-        
-        if (!uploadResult.success) {
-          throw new Error(uploadResult.message || 'Failed to upload homogeneous files');
-        }
-        
-        datasetId = uploadResult.datasetId;
-        
-        // Step 2: Process homogeneous dataset
-        setProcessingStep('Processing homogeneous dataset...');
-        processResult = await api.processDataset(datasetId, localK);
-        
-      } else if (localProcessingType === 'heterogeneous') {
-        // Validate heterogeneous files
-        if (!validateHeterogeneousFiles()) {
-          setProcessing(false);
-          return;
-        }
-
-        // Step 1: Upload heterogeneous files
-        setProcessingStep('Uploading heterogeneous files...');
-        uploadResult = await api.uploadFilesHeterogeneous(
-          localInfoFile, localLinkFile, localNodeFile, localMetaFile, localK
-        );
-        
-        if (!uploadResult.success) {
-          throw new Error(uploadResult.message || 'Failed to upload heterogeneous files');
-        }
-        
-        datasetId = uploadResult.datasetId;
-        
-        // Step 2: Process heterogeneous dataset
-        setProcessingStep('Processing heterogeneous dataset...');
-        processResult = await api.processDatasetHeterogeneous(datasetId, localK);
-        
-      } else if (localProcessingType === 'scar') {
-        // Validate SCAR files (same as heterogeneous)
-        if (!validateHeterogeneousFiles()) {
-          setProcessing(false);
-          return;
-        }
-
-        // Step 1: Upload SCAR files
-        setProcessingStep('Uploading SCAR files...');
-        uploadResult = await api.uploadFilesScar(
-          localInfoFile, localLinkFile, localNodeFile, localMetaFile, localK, localNk, localTh
-        );
-        
-        if (!uploadResult.success) {
-          throw new Error(uploadResult.message || 'Failed to upload SCAR files');
-        }
-        
-        datasetId = uploadResult.datasetId;
-        
-        // Step 2: Process SCAR dataset
-        setProcessingStep('Processing SCAR dataset...');
-        processResult = await api.processDatasetScar(datasetId, localK, localNk, localTh);
+      // Validate files using registry
+      const fileValidation = AlgorithmRegistry.validateFiles(selectedAlgorithm, files);
+      if (!fileValidation.valid) {
+        throw new Error(fileValidation.error);
       }
-      
-      if (!processResult.success) {
-        throw new Error(processResult.message || 'Failed to process dataset');
+
+      // Validate parameters using registry
+      const paramValidation = AlgorithmRegistry.validateParameters(selectedAlgorithm, parameters);
+      if (!paramValidation.valid) {
+        throw new Error(paramValidation.error);
       }
+
+      // Update app state
+      actions.setMode('single');
+      actions.setAlgorithm(selectedAlgorithm);
+      actions.setLoading(true);
+      actions.setProcessingStep('Processing dataset...');
+
+      // Process using DataService
+      const result = await DataService.processDataset(selectedAlgorithm, files, parameters);
       
-      // Set the final dataset ID (already includes _heterogeneous or _scar suffix)
-      setDataset(processResult.result?.datasetId || datasetId);
-      
-      // Step 3: Get hierarchy data
-      setProcessingStep('Loading hierarchy data...');
-      const hierarchyResult = await api.getHierarchyData(
-        processResult.result?.datasetId || datasetId, 
-        localK, 
-        localProcessingType
+      if (!result.success) {
+        throw new Error(result.message || 'Processing failed');
+      }
+
+      // Load hierarchy data
+      const hierarchyResult = await DataService.getHierarchyData(
+        selectedAlgorithm,
+        result.result?.datasetId || result.datasetId,
+        parameters
       );
-      
-      if (!hierarchyResult.success) {
-        throw new Error(hierarchyResult.message || 'Failed to get hierarchy data');
-      }
-      
-      // Set hierarchy and mapping data in the global context
-      setHierarchyData(hierarchyResult.hierarchy);
-      setMappingData(hierarchyResult.mapping);
-      
-      // Set the root node and breadcrumb path
-      const rootNode = processResult.result?.rootNode || 'c0_l3_0';
-      setCurrentSupernode(rootNode);
-      setBreadcrumbPath([{ id: rootNode, label: rootNode }]);
-      
-      // Mark files as uploaded
-      setFileUploaded(true);
-      
-      // Close the modal
-      handleCloseModal();
 
-      console.log(`${localProcessingType} files processed successfully`);
+      if (!hierarchyResult.success) {
+        throw new Error(hierarchyResult.message || 'Failed to load hierarchy data');
+      }
+
+      // Update app state with results
+      actions.setDataset(result.result?.datasetId || result.datasetId);
+      actions.setHierarchyData(hierarchyResult.hierarchy);
+      actions.setMappingData(hierarchyResult.mapping);
+      actions.setFileUploaded(true);
+
+      // Set initial navigation
+      const rootNode = result.result?.rootNode || 'c0_l3_0';
+      actions.setBreadcrumbPath([{ id: rootNode, label: rootNode }]);
+      actions.setCurrentSupernode(rootNode);
+
+      // Close modal
+      handleCloseModal();
+      
+      console.log(`✅ Single mode processing completed for ${selectedAlgorithm}`);
+      
     } catch (err) {
-      setUploadError(`Error processing ${localProcessingType} files: ${err.message}`);
+      setError(err.message);
+      console.error('Single mode processing failed:', err);
     } finally {
       setProcessing(false);
+      actions.setLoading(false);
     }
   };
 
-  // Check if all required files are uploaded
-  const areFilesReady = () => {
-    if (localProcessingType === 'homogeneous') {
-      return localEdgeListFile && localAttributesFile;
+  // Process files for comparison mode
+  const processComparisonMode = async () => {
+    setProcessing(true);
+    setError(null);
+
+    try {
+      // Validate files for comparison (needs heterogeneous files)
+      const heteroAlgorithm = AlgorithmRegistry.getAlgorithm('heterogeneous');
+      const fileValidation = heteroAlgorithm.validateFiles(files);
+      if (!fileValidation.valid) {
+        throw new Error(fileValidation.error);
+      }
+
+      // Validate parameters for both algorithms
+      const heteroValidation = AlgorithmRegistry.validateParameters('heterogeneous', comparisonParams.heterogeneous);
+      if (!heteroValidation.valid) {
+        throw new Error(`Heterogeneous params: ${heteroValidation.error}`);
+      }
+
+      const scarValidation = AlgorithmRegistry.validateParameters('scar', comparisonParams.scar);
+      if (!scarValidation.valid) {
+        throw new Error(`SCAR params: ${scarValidation.error}`);
+      }
+
+      // Update app state
+      actions.setMode('comparison');
+      actions.setLoading(true);
+      actions.setProcessingStep('Running algorithm comparison...');
+
+      // Run comparison using DataService
+      const comparisonResult = await DataService.runComparison({
+        heterogeneous: {
+          files: files,
+          parameters: comparisonParams.heterogeneous
+        },
+        scar: {
+          files: files,
+          parameters: comparisonParams.scar
+        }
+      });
+
+      if (!comparisonResult.success) {
+        throw new Error(comparisonResult.message || 'Comparison failed');
+      }
+
+      // Update app state with comparison results
+      actions.setComparisonData(comparisonResult.comparison);
+      actions.setComparisonMetrics(comparisonResult.comparison.metrics);
+      actions.setFileUploaded(true);
+
+      // Close modal
+      handleCloseModal();
+      
+      console.log('✅ Comparison mode processing completed');
+      
+    } catch (err) {
+      setError(err.message);
+      console.error('Comparison mode processing failed:', err);
+    } finally {
+      setProcessing(false);
+      actions.setLoading(false);
+    }
+  };
+
+  // Main processing function
+  const processFiles = async () => {
+    if (uploadMode === 'compare') {
+      await processComparisonMode();
     } else {
-      return localInfoFile && localLinkFile && localNodeFile && localMetaFile;
+      await processSingleMode();
     }
   };
 
@@ -287,243 +310,162 @@ const FileUpload = () => {
           <Modal.Title>Upload Graph Files</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {uploadError && (
-            <Alert variant="danger">{uploadError}</Alert>
+          {error && (
+            <Alert variant="danger">{error}</Alert>
           )}
 
-          {/* Processing Type Selection */}
+          {/* Upload Mode Selection */}
           <Card className="mb-3">
             <Card.Header>
-              <h6 className="mb-0">Processing Type</h6>
+              <h6 className="mb-0">Upload Mode</h6>
             </Card.Header>
             <Card.Body>
-              <Form.Group>
-                <Form.Check
-                  type="radio"
-                  id="homogeneous"
-                  name="processingType"
-                  label={
-                    <div>
-                      <strong>Homogeneous Graph</strong>
-                      <div className="text-muted small">Traditional graph with edge list and attributes (2 files)</div>
-                    </div>
-                  }
-                  value="homogeneous"
-                  checked={localProcessingType === 'homogeneous'}
-                  onChange={handleProcessingTypeChange}
-                  className="mb-2"
-                />
-                <Form.Check
-                  type="radio"
-                  id="heterogeneous"
-                  name="processingType"
-                  label={
-                    <div>
-                      <strong>Heterogeneous Graph</strong>
-                      <div className="text-muted small">Multi-type network with specialized files (4 files)</div>
-                    </div>
-                  }
-                  value="heterogeneous"
-                  checked={localProcessingType === 'heterogeneous'}
-                  onChange={handleProcessingTypeChange}
-                  className="mb-2"
-                />
-                <Form.Check
-                  type="radio"
-                  id="scar"
-                  name="processingType"
-                  label={
-                    <div>
-                      <strong>SCAR Processing</strong>
-                      <div className="text-muted small">SCAR algorithm with advanced parameters (4 files)</div>
-                    </div>
-                  }
-                  value="scar"
-                  checked={localProcessingType === 'scar'}
-                  onChange={handleProcessingTypeChange}
-                />
-              </Form.Group>
+              <ButtonGroup className="w-100">
+                <Button
+                  variant={uploadMode === 'single' ? 'primary' : 'outline-primary'}
+                  onClick={() => handleUploadModeChange('single')}
+                >
+                  📊 Single Algorithm
+                </Button>
+                <Button
+                  variant={uploadMode === 'compare' ? 'primary' : 'outline-primary'}
+                  onClick={() => handleUploadModeChange('compare')}
+                >
+                  🔄 Compare Algorithms
+                </Button>
+              </ButtonGroup>
+              <Form.Text className="text-muted mt-2">
+                {uploadMode === 'single' 
+                  ? 'Run one algorithm and explore the results'
+                  : 'Run Heterogeneous vs SCAR algorithms and compare their clustering results'
+                }
+              </Form.Text>
             </Card.Body>
           </Card>
 
-          <Form>
-            {/* Homogeneous File Upload */}
-            {localProcessingType === 'homogeneous' && (
+          {/* Single Algorithm Mode */}
+          {uploadMode === 'single' && (
+            <>
+              {/* Algorithm Selection */}
               <Card className="mb-3">
                 <Card.Header>
-                  <h6 className="mb-0">Homogeneous Graph Files</h6>
+                  <h6 className="mb-0">Algorithm Selection</h6>
                 </Card.Header>
                 <Card.Body>
-                  <Form.Group className="mb-3">
-                    <Form.Label>Edge List File</Form.Label>
-                    <Form.Control 
-                      type="file" 
-                      onChange={handleEdgeListChange}
-                      accept=".txt,.csv"
-                    />
+                  <Form.Group>
+                    <Form.Label>Processing Algorithm</Form.Label>
+                    <Form.Select value={selectedAlgorithm} onChange={(e) => handleAlgorithmChange(e.target.value)}>
+                      {availableAlgorithms.map(algorithm => (
+                        <option key={algorithm.id} value={algorithm.id}>
+                          {algorithm.name}
+                        </option>
+                      ))}
+                    </Form.Select>
                     <Form.Text className="text-muted">
-                      Space-separated node pairs, each on a new line
-                    </Form.Text>
-                  </Form.Group>
-
-                  <Form.Group className="mb-3">
-                    <Form.Label>Basic Attributes File</Form.Label>
-                    <Form.Control 
-                      type="file" 
-                      onChange={handleAttributesChange}
-                      accept=".txt,.csv"
-                    />
-                    <Form.Text className="text-muted">
-                      Contains node and edge counts
+                      {currentAlgorithm.description}
                     </Form.Text>
                   </Form.Group>
                 </Card.Body>
               </Card>
-            )}
 
-            {/* Heterogeneous/SCAR File Upload */}
-            {(localProcessingType === 'heterogeneous' || localProcessingType === 'scar') && (
+              {/* File Upload Section */}
               <Card className="mb-3">
                 <Card.Header>
                   <h6 className="mb-0">
-                    {localProcessingType === 'heterogeneous' ? 'Heterogeneous' : 'SCAR'} Graph Files
-                    <Badge bg="info" className="ms-2">4 files required</Badge>
+                    Required Files 
+                    <Badge bg="info" className="ms-2">{currentAlgorithm.fileRequirements.count} files</Badge>
+                  </h6>
+                </Card.Header>
+                <Card.Body>
+                  {currentAlgorithm.fileRequirements.naming && (
+                    <Alert variant="info" className="mb-3">
+                      <small>
+                        <strong>File naming convention:</strong> {currentAlgorithm.fileRequirements.naming}
+                      </small>
+                    </Alert>
+                  )}
+                  {renderFileInputs(currentAlgorithm)}
+                </Card.Body>
+              </Card>
+
+              {/* Parameters Section */}
+              <Card className="mb-3">
+                <Card.Header>
+                  <h6 className="mb-0">Algorithm Parameters</h6>
+                </Card.Header>
+                <Card.Body>
+                  {renderParameterInputs(currentAlgorithm, parameters, handleParameterChange)}
+                </Card.Body>
+              </Card>
+            </>
+          )}
+
+          {/* Comparison Mode */}
+          {uploadMode === 'compare' && (
+            <>
+              {/* File Upload for Comparison */}
+              <Card className="mb-3">
+                <Card.Header>
+                  <h6 className="mb-0">
+                    Dataset Files <Badge bg="warning">4 files required</Badge>
                   </h6>
                 </Card.Header>
                 <Card.Body>
                   <Alert variant="info" className="mb-3">
                     <small>
-                      <strong>File naming convention:</strong> All files must follow the pattern <code>datasetName_type.dat</code><br/>
-                      Example: <code>amazon_info.dat</code>, <code>amazon_link.dat</code>, <code>amazon_node.dat</code>, <code>amazon_meta.dat</code>
+                      <strong>📊 Comparison Note:</strong> Both algorithms will use the same dataset files.<br/>
+                      <strong>File naming:</strong> datasetName_type.dat (e.g., amazon_info.dat)
                     </small>
                   </Alert>
-
-                  <Row>
-                    <Col md={6}>
-                      <Form.Group className="mb-3">
-                        <Form.Label>Info File (*_info.dat)</Form.Label>
-                        <Form.Control 
-                          type="file" 
-                          onChange={handleInfoFileChange}
-                          accept=".dat"
-                        />
-                        <Form.Text className="text-muted">
-                          Graph information and metadata
-                        </Form.Text>
-                      </Form.Group>
-
-                      <Form.Group className="mb-3">
-                        <Form.Label>Link File (*_link.dat)</Form.Label>
-                        <Form.Control 
-                          type="file" 
-                          onChange={handleLinkFileChange}
-                          accept=".dat"
-                        />
-                        <Form.Text className="text-muted">
-                          Edge/link information
-                        </Form.Text>
-                      </Form.Group>
-                    </Col>
-                    <Col md={6}>
-                      <Form.Group className="mb-3">
-                        <Form.Label>Node File (*_node.dat)</Form.Label>
-                        <Form.Control 
-                          type="file" 
-                          onChange={handleNodeFileChange}
-                          accept=".dat"
-                        />
-                        <Form.Text className="text-muted">
-                          Node information and attributes
-                        </Form.Text>
-                      </Form.Group>
-
-                      <Form.Group className="mb-3">
-                        <Form.Label>Meta File (*_meta.dat)</Form.Label>
-                        <Form.Control 
-                          type="file" 
-                          onChange={handleMetaFileChange}
-                          accept=".dat"
-                        />
-                        <Form.Text className="text-muted">
-                          Meta-path information
-                        </Form.Text>
-                      </Form.Group>
-                    </Col>
-                  </Row>
+                  {renderFileInputs(AlgorithmRegistry.getAlgorithm('heterogeneous'))}
                 </Card.Body>
               </Card>
-            )}
 
-            {/* Parameters */}
-            <Card className="mb-3">
-              <Card.Header>
-                <h6 className="mb-0">Processing Parameters</h6>
-              </Card.Header>
-              <Card.Body>
-                <Row>
-                  <Col md={localProcessingType === 'scar' ? 4 : 12}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>Cluster Size (k)</Form.Label>
-                      <Form.Control 
-                        type="number" 
-                        value={localK}
-                        min={1}
-                        onChange={handleKChange}
-                      />
-                      <Form.Text className="text-muted">
-                        Maximum number of nodes in a supernode
-                      </Form.Text>
-                    </Form.Group>
-                  </Col>
+              {/* Algorithm Parameters for Comparison */}
+              <Row>
+                <Col md={6}>
+                  <Card className="mb-3">
+                    <Card.Header>
+                      <h6 className="mb-0">🟢 Heterogeneous Algorithm</h6>
+                    </Card.Header>
+                    <Card.Body>
+                      {renderParameterInputs(
+                        AlgorithmRegistry.getAlgorithm('heterogeneous'),
+                        comparisonParams.heterogeneous,
+                        (paramId, value) => handleComparisonParameterChange('heterogeneous', paramId, value)
+                      )}
+                    </Card.Body>
+                  </Card>
+                </Col>
 
-                  {/* SCAR-specific parameters */}
-                  {localProcessingType === 'scar' && (
-                    <>
-                      <Col md={4}>
-                        <Form.Group className="mb-3">
-                          <Form.Label>NK Parameter</Form.Label>
-                          <Form.Control 
-                            type="number" 
-                            value={localNk}
-                            min={1}
-                            onChange={handleNkChange}
-                          />
-                          <Form.Text className="text-muted">
-                            SCAR NK parameter
-                          </Form.Text>
-                        </Form.Group>
-                      </Col>
-                      <Col md={4}>
-                        <Form.Group className="mb-3">
-                          <Form.Label>Threshold (th)</Form.Label>
-                          <Form.Control 
-                            type="number" 
-                            value={localTh}
-                            min={0}
-                            max={1}
-                            step={0.1}
-                            onChange={handleThChange}
-                          />
-                          <Form.Text className="text-muted">
-                            SCAR threshold (0.0 - 1.0)
-                          </Form.Text>
-                        </Form.Group>
-                      </Col>
-                    </>
-                  )}
-                </Row>
-              </Card.Body>
-            </Card>
-          </Form>
+                <Col md={6}>
+                  <Card className="mb-3">
+                    <Card.Header>
+                      <h6 className="mb-0">🟡 SCAR Algorithm</h6>
+                    </Card.Header>
+                    <Card.Body>
+                      {renderParameterInputs(
+                        AlgorithmRegistry.getAlgorithm('scar'),
+                        comparisonParams.scar,
+                        (paramId, value) => handleComparisonParameterChange('scar', paramId, value)
+                      )}
+                    </Card.Body>
+                  </Card>
+                </Col>
+              </Row>
+            </>
+          )}
         </Modal.Body>
+        
         <Modal.Footer>
           <Button variant="secondary" onClick={handleCloseModal}>
             Cancel
           </Button>
+          
           <Button 
-            variant="primary" 
+            variant={uploadMode === 'compare' ? 'warning' : 'primary'}
             onClick={processFiles}
-            disabled={processing || !areFilesReady()}
+            disabled={processing || loading || !areFilesReady()}
           >
             {processing ? (
               <>
@@ -535,10 +477,10 @@ const FileUpload = () => {
                   aria-hidden="true"
                   className="me-2"
                 />
-                Processing {localProcessingType}...
+                {uploadMode === 'compare' ? 'Running Comparison...' : `Processing ${currentAlgorithm.name}...`}
               </>
             ) : (
-              `Process ${localProcessingType} Files`
+              uploadMode === 'compare' ? '🔄 Compare Algorithms' : `📊 Process ${currentAlgorithm.name}`
             )}
           </Button>
         </Modal.Footer>
