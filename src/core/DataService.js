@@ -271,6 +271,8 @@ class DataService {
     formData.append('nk', parameters.nk);
     formData.append('th', parameters.th);
     
+    console.log('🔄 Uploading SCAR files with parameters:', parameters);
+    
     const uploadResponse = await fetch(`${this.apiBaseUrl}/upload-scar`, {
       method: 'POST',
       body: formData

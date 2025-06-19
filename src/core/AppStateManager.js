@@ -30,10 +30,12 @@ const ActionTypes = {
   SET_COMPARISON_DATA: 'SET_COMPARISON_DATA',
   SET_COMPARISON_METRICS: 'SET_COMPARISON_METRICS',
   UPDATE_COMPARISON_STATE: 'UPDATE_COMPARISON_STATE',
+  SET_COMPARISON_FILES: 'SET_COMPARISON_FILES',
   
   // Reset actions
   RESET_ALL: 'RESET_ALL',
-  RESET_VISUALIZATION: 'RESET_VISUALIZATION'
+  RESET_VISUALIZATION: 'RESET_VISUALIZATION',
+
 };
 
 // Initial state
@@ -79,7 +81,8 @@ const initialState = {
       selectedNode: null,
       nodeStatistics: null
     }
-  }
+  },
+  comparisonFiles: null, 
 };
 
 // Reducer function
@@ -94,7 +97,10 @@ function appStateReducer(state, action) {
       
     case ActionTypes.SET_PROCESSING_STEP:
       return { ...state, processingStep: action.payload };
-      
+    
+    case ActionTypes.SET_COMPARISON_FILES:
+      return { ...state, comparisonFiles: action.payload };
+
     case ActionTypes.SET_MODE:
       // Reset relevant state when switching modes
       if (action.payload === 'comparison') {
@@ -116,6 +122,7 @@ function appStateReducer(state, action) {
           // Clear comparison state
           comparisonData: null,
           comparisonMetrics: null,
+          comparisonFiles: null,
           comparisonState: initialState.comparisonState
         };
       }
@@ -188,6 +195,8 @@ function appStateReducer(state, action) {
         }
       };
     }
+
+
     
     // Reset reducers
     case ActionTypes.RESET_ALL:
@@ -298,6 +307,10 @@ export function AppStateProvider({ children }) {
     updateComparisonState: useCallback((algorithm, updates) => {
       dispatch({ type: ActionTypes.UPDATE_COMPARISON_STATE, payload: { algorithm, updates } });
     }, []),
+
+    setComparisonFiles: useCallback((files) => {
+      dispatch({ type: ActionTypes.SET_COMPARISON_FILES, payload: files });
+    }, []),
     
     // Reset actions
     resetAll: useCallback(() => {
@@ -359,7 +372,8 @@ export function useComparisonState() {
   return {
     comparisonData: state.comparisonData,
     comparisonMetrics: state.comparisonMetrics,
-    comparisonState: state.comparisonState
+    comparisonState: state.comparisonState,
+    comparisonFiles: state.comparisonFiles 
   };
 }
 

@@ -254,6 +254,7 @@ const FileUpload = () => {
       actions.setMode('comparison');
       actions.setLoading(true);
       actions.setProcessingStep('Running algorithm comparison...');
+      actions.setComparisonFiles(files);
 
       // Run comparison using DataService
       const comparisonResult = await DataService.runComparison({

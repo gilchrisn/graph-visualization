@@ -8,8 +8,18 @@ import AlgorithmRegistry from '../core/AlgorithmRegistry';
 const ComparisonModeView = () => {
   const { actions } = useAppState();
   const { loading, error, processingStep } = useLoadingState();
-  const { comparisonData, comparisonMetrics, comparisonState } = useComparisonState();
-  
+  const { comparisonData, comparisonMetrics, comparisonState, comparisonFiles } = useComparisonState();
+
+  React.useEffect(() => {
+    console.log('ComparisonModeView - comparisonFiles:', comparisonFiles);
+    if (comparisonFiles) {
+      console.log('Files object keys:', Object.keys(comparisonFiles));
+      Object.entries(comparisonFiles).forEach(([key, file]) => {
+        console.log(`${key}:`, file ? file.name : 'null');
+      });
+    }
+  }, [comparisonFiles]);
+
   // Local parameter state for each algorithm
   const [heteroParams, setHeteroParams] = useState({
     k: comparisonData?.heterogeneous?.parameters?.k || 25
@@ -255,7 +265,11 @@ const ComparisonModeView = () => {
 
   // Apply parameter changes for heterogeneous algorithm
   const applyHeteroParams = async () => {
-    if (!comparisonData?.heterogeneous) return;
+    if (!comparisonData?.heterogeneous || !comparisonFiles) {
+      console.error('Missing comparison data or files');
+      actions.setError('Missing comparison data or original files');
+      return;
+    }
     
     actions.setLoading(true);
     actions.setProcessingStep('Updating Heterogeneous parameters...');
@@ -268,8 +282,7 @@ const ComparisonModeView = () => {
       }
 
       // Reprocess with new parameters
-      const baseDatasetId = comparisonData.heterogeneous.datasetId.replace('_heterogeneous', '');
-      const processResult = await DataService.processDataset('heterogeneous', {}, heteroParams);
+      const processResult = await DataService.processDataset('heterogeneous', comparisonFiles, heteroParams);
       
       if (!processResult.success) {
         throw new Error(processResult.message || 'Failed to process with new parameters');
@@ -301,7 +314,16 @@ const ComparisonModeView = () => {
 
   // Apply parameter changes for SCAR algorithm
   const applyScarParams = async () => {
-    if (!comparisonData?.scar) return;
+    console.log('applyScarParams called');
+    console.log('comparisonData?.scar:', !!comparisonData?.scar);
+    console.log('comparisonFiles:', !!comparisonFiles);
+    console.log('comparisonFiles content:', comparisonFiles);
+    
+    if (!comparisonData?.scar || !comparisonFiles) {
+      console.error('Missing comparison data or files');
+      actions.setError('Missing comparison data or original files');
+      return;
+    }
     
     actions.setLoading(true);
     actions.setProcessingStep('Updating SCAR parameters...');
@@ -314,8 +336,7 @@ const ComparisonModeView = () => {
       }
 
       // Reprocess with new parameters
-      const baseDatasetId = comparisonData.scar.datasetId.replace('_scar', '');
-      const processResult = await DataService.processDataset('scar', {}, scarParams);
+      const processResult = await DataService.processDataset('scar', comparisonFiles, scarParams);
       
       if (!processResult.success) {
         throw new Error(processResult.message || 'Failed to process with new parameters');
