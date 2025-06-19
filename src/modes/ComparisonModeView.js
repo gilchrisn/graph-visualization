@@ -314,13 +314,13 @@ const ComparisonModeView = () => {
 
   // Apply parameter changes for SCAR algorithm
   const applyScarParams = async () => {
-    console.log('applyScarParams called');
-    console.log('comparisonData?.scar:', !!comparisonData?.scar);
-    console.log('comparisonFiles:', !!comparisonFiles);
-    console.log('comparisonFiles content:', comparisonFiles);
+    console.log('🔄 applyScarParams called');
+    console.log('📊 Current scarParams:', scarParams);
+    console.log('📁 comparisonFiles available:', !!comparisonFiles);
+    console.log('🗂️ comparisonData.scar available:', !!comparisonData?.scar);
     
     if (!comparisonData?.scar || !comparisonFiles) {
-      console.error('Missing comparison data or files');
+      console.error('❌ Missing comparison data or files');
       actions.setError('Missing comparison data or original files');
       return;
     }
@@ -329,19 +329,34 @@ const ComparisonModeView = () => {
     actions.setProcessingStep('Updating SCAR parameters...');
     
     try {
-      // Validate parameters
-      const validation = AlgorithmRegistry.validateParameters('scar', scarParams);
+      // Ensure parameters are correct types
+      const normalizedParams = {
+        k: parseInt(scarParams.k),        // Ensure integer
+        nk: parseInt(scarParams.nk),      // Ensure integer  
+        th: parseFloat(scarParams.th)     // Ensure float
+      };
+      
+      console.log('📊 Original scarParams:', scarParams);
+      console.log('📊 Normalized params:', normalizedParams);
+      
+      // Validate the normalized parameters
+      const validation = AlgorithmRegistry.validateParameters('scar', normalizedParams);
       if (!validation.valid) {
         throw new Error(validation.error);
       }
 
-      // Reprocess with new parameters
-      const processResult = await DataService.processDataset('scar', comparisonFiles, scarParams);
+      // Use normalized parameters
+      const processResult = await DataService.processDataset('scar', comparisonFiles, normalizedParams);
+      
+      console.log('✅ DataService.processDataset completed:', processResult);
       
       if (!processResult.success) {
         throw new Error(processResult.message || 'Failed to process with new parameters');
       }
       
+      // Update local state to reflect the normalized parameters
+      setScarParams(normalizedParams);
+
       // Reload hierarchy data
       await loadAlgorithmHierarchy('scar');
       
@@ -360,6 +375,8 @@ const ComparisonModeView = () => {
       });
       
     } catch (err) {
+      console.error('❌ Error in applyScarParams:', err);
+      console.error('❌ Error stack:', err.stack);
       actions.setError(`Error updating SCAR parameters: ${err.message}`);
     } finally {
       actions.setLoading(false);

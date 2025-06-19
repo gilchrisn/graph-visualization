@@ -259,7 +259,7 @@ class DataService {
     
     return processResult;
   }
-
+  
   async _processScar(files, parameters) {
     // Upload step
     const formData = new FormData();
@@ -279,48 +279,56 @@ class DataService {
     });
     
     if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      console.error('❌ Upload failed:', uploadResponse.status, errorText);
       throw new Error(`Upload failed: ${uploadResponse.statusText}`);
     }
     
     const uploadResult = await uploadResponse.json();
+    console.log('✅ Upload successful:', uploadResult);
+    
     if (!uploadResult.success) {
       throw new Error(uploadResult.message || 'Upload failed');
     }
     
     // Process step
+    const processPayload = {
+      datasetId: uploadResult.datasetId,
+      k: parameters.k,
+      nk: parameters.nk,
+      th: parameters.th
+    };
+    
+    console.log('🔄 Processing SCAR with payload:', processPayload);
+    
     const processResponse = await fetch(`${this.apiBaseUrl}/process-scar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        datasetId: uploadResult.datasetId,
-        k: parameters.k,
-        nk: parameters.nk,
-        th: parameters.th
-      })
+      body: JSON.stringify(processPayload)
     });
     
     if (!processResponse.ok) {
-      throw new Error(`Processing failed: ${processResponse.statusText}`);
+      // Get detailed error information
+      let errorDetails;
+      try {
+        errorDetails = await processResponse.json();
+        console.error('❌ Processing failed with details:', errorDetails);
+      } catch (e) {
+        errorDetails = await processResponse.text();
+        console.error('❌ Processing failed with text:', errorDetails);
+      }
+      
+      throw new Error(`Processing failed: ${processResponse.statusText}. Details: ${JSON.stringify(errorDetails)}`);
     }
     
     const processResult = await processResponse.json();
+    console.log('✅ Processing successful:', processResult);
+    
     if (!processResult.success) {
       throw new Error(processResult.message || 'Processing failed');
     }
     
     return processResult;
-  }
-
-  // Utility methods
-  clearCache() {
-    this.cache.clear();
-  }
-
-  getCacheStats() {
-    return {
-      size: this.cache.size,
-      keys: Array.from(this.cache.keys())
-    };
   }
 }
 
