@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navbar, Nav, Container, Badge } from 'react-bootstrap';
-import { useAppState, useDataState, useAppMode } from '../../core/AppStateManager';
+import { useAppState, useDataState, useAppMode, useComparisonState } from '../../core/AppStateManager';
+import AlgorithmRegistry from '../../core/AlgorithmRegistry';
 import FileUpload from '../FileUpload/FileUpload';
 import './Header.css';
 
@@ -8,6 +9,7 @@ const Header = () => {
   const { actions } = useAppState();
   const { fileUploaded, algorithm } = useDataState();
   const mode = useAppMode();
+  const { comparisonData } = useComparisonState();
 
   // Handle mode switching
   const handleModeSwitch = (newMode) => {
@@ -20,7 +22,7 @@ const Header = () => {
       case 'homogeneous': return 'success';
       case 'heterogeneous': return 'info';
       case 'scar': return 'warning';
-      default: return 'secondary';
+      default: return 'primary';
     }
   };
 
@@ -33,6 +35,39 @@ const Header = () => {
     }
   };
 
+  // Get comparison algorithms for display
+  const getComparisonAlgorithms = () => {
+    if (!comparisonData) return [];
+    
+    const algorithmIds = Object.keys(comparisonData).filter(key => 
+      key !== 'metrics' && key !== 'timestamp' && comparisonData[key].parameters
+    );
+    
+    return algorithmIds.map(id => {
+      try {
+        return AlgorithmRegistry.getAlgorithm(id);
+      } catch (error) {
+        console.warn(`Could not find algorithm config for: ${id}`);
+        return { id, name: id };
+      }
+    });
+  };
+
+  // Render algorithm badges for comparison mode
+  const renderComparisonBadges = () => {
+    const algorithms = getComparisonAlgorithms();
+    
+    return algorithms.map((alg, index) => (
+      <Badge 
+        key={alg.id} 
+        bg={getAlgorithmBadge(alg.id)} 
+        className={index > 0 ? 'ms-1' : ''}
+      >
+        {alg.name || alg.id}
+      </Badge>
+    ));
+  };
+
   return (
     <Navbar bg="dark" variant="dark" expand="lg">
       <Container>
@@ -43,10 +78,21 @@ const Header = () => {
               <Badge bg={getModeBadge(mode)} className="me-2">
                 {mode === 'comparison' ? 'Comparison' : 'Single'} Mode
               </Badge>
-              {mode === 'single' && (
+              
+              {mode === 'single' && algorithm && (
                 <Badge bg={getAlgorithmBadge(algorithm)}>
-                  {algorithm}
+                  {(() => {
+                    try {
+                      return AlgorithmRegistry.getAlgorithm(algorithm).name;
+                    } catch (error) {
+                      return algorithm;
+                    }
+                  })()}
                 </Badge>
+              )}
+              
+              {mode === 'comparison' && comparisonData && (
+                <>{renderComparisonBadges()}</>
               )}
             </div>
           )}
@@ -63,15 +109,29 @@ const Header = () => {
                   onClick={() => handleModeSwitch('single')}
                   className={mode === 'single' ? 'active' : ''}
                 >
-                  📊 Single Mode
+                  🔍 Single Mode
                 </Nav.Link>
-                <Nav.Link 
-                  href="#"
-                  onClick={() => handleModeSwitch('comparison')}
-                  className={mode === 'comparison' ? 'active' : ''}
-                >
-                  🔄 Comparison Mode
-                </Nav.Link>
+                
+                {/* Only show comparison mode if algorithms support it */}
+                {(() => {
+                  // Check if current algorithm or any algorithm supports comparison
+                  const hasComparisonSupport = mode === 'comparison' || 
+                    (algorithm && AlgorithmRegistry.supportsComparison(algorithm)) ||
+                    AlgorithmRegistry.getComparisonAlgorithms().length > 0;
+                  
+                  if (hasComparisonSupport) {
+                    return (
+                      <Nav.Link 
+                        href="#"
+                        onClick={() => handleModeSwitch('comparison')}
+                        className={mode === 'comparison' ? 'active' : ''}
+                      >
+                        ⚖️ Comparison Mode
+                      </Nav.Link>
+                    );
+                  }
+                  return null;
+                })()}
               </>
             )}
           </Nav>

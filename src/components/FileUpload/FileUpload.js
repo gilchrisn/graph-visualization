@@ -3,6 +3,7 @@ import { Button, ButtonGroup, Modal, Form, Alert, Spinner, Card, Row, Col, Badge
 import { useAppState, useLoadingState } from '../../core/AppStateManager';
 import DataService from '../../core/DataService';
 import AlgorithmRegistry from '../../core/AlgorithmRegistry';
+import GraphTypeManager from '../../core/GraphTypeManager';
 import './FileUpload.css';
 
 const FileUpload = () => {
@@ -13,37 +14,43 @@ const FileUpload = () => {
   const [showModal, setShowModal] = useState(false);
   const [uploadMode, setUploadMode] = useState('single'); // 'single' or 'compare'
   
-  // Algorithm and files state
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState('homogeneous');
+  // Graph type selection (step 1)
+  const [selectedGraphType, setSelectedGraphType] = useState('');
+  
+  // File upload state (step 2)
   const [files, setFiles] = useState({});
   const [error, setError] = useState(null);
   const [processing, setProcessing] = useState(false);
   
-  // Parameters state
-  const [parameters, setParameters] = useState(
-    AlgorithmRegistry.getDefaultParameters('homogeneous')
-  );
+  // Algorithm selection and parameters (step 3)
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('');
+  const [parameters, setParameters] = useState({});
   
-  // Comparison mode parameters
-  const [comparisonParams, setComparisonParams] = useState({
-    heterogeneous: AlgorithmRegistry.getDefaultParameters('heterogeneous'),
-    scar: AlgorithmRegistry.getDefaultParameters('scar')
-  });
+  // Comparison mode specific state
+  const [leftAlgorithm, setLeftAlgorithm] = useState('');
+  const [rightAlgorithm, setRightAlgorithm] = useState('');
+  const [comparisonParameters, setComparisonParameters] = useState({});
 
-  // Get available algorithms from registry
-  const availableAlgorithms = AlgorithmRegistry.getAllAlgorithms();
-  const currentAlgorithm = AlgorithmRegistry.getAlgorithm(selectedAlgorithm);
-  const comparisonAlgorithms = AlgorithmRegistry.getComparisonAlgorithms();
+  // Get available graph types
+  const availableGraphTypes = GraphTypeManager.getAllGraphTypes();
 
   // Handle modal open/close
   const handleShowModal = () => setShowModal(true);
   const handleCloseModal = () => {
     setShowModal(false);
+    resetAllState();
+  };
+
+  const resetAllState = () => {
     setError(null);
     setFiles({});
     setUploadMode('single');
-    setSelectedAlgorithm('homogeneous');
-    setParameters(AlgorithmRegistry.getDefaultParameters('homogeneous'));
+    setSelectedGraphType('');
+    setSelectedAlgorithm('');
+    setParameters({});
+    setLeftAlgorithm('');
+    setRightAlgorithm('');
+    setComparisonParameters({});
   };
 
   // Handle upload mode change
@@ -51,22 +58,64 @@ const FileUpload = () => {
     setUploadMode(mode);
     setError(null);
     setFiles({});
+    setSelectedGraphType('');
+    setSelectedAlgorithm('');
+    setParameters({});
+    setLeftAlgorithm('');
+    setRightAlgorithm('');
+    setComparisonParameters({});
+  };
+
+  // Handle graph type selection (step 1)
+  const handleGraphTypeChange = (graphTypeId) => {
+    setSelectedGraphType(graphTypeId);
+    setFiles({});
+    setError(null);
     
-    if (mode === 'single') {
-      setSelectedAlgorithm('homogeneous');
-      setParameters(AlgorithmRegistry.getDefaultParameters('homogeneous'));
+    if (uploadMode === 'single') {
+      // Reset algorithm selection for single mode
+      setSelectedAlgorithm('');
+      setParameters({});
+    } else {
+      // Reset algorithm selections for comparison mode
+      setLeftAlgorithm('');
+      setRightAlgorithm('');
+      setComparisonParameters({});
     }
   };
 
-  // Handle algorithm selection (single mode only)
+  // Handle algorithm selection (single mode, step 3)
   const handleAlgorithmChange = (algorithmId) => {
     setSelectedAlgorithm(algorithmId);
-    setFiles({});
     setParameters(AlgorithmRegistry.getDefaultParameters(algorithmId));
     setError(null);
   };
 
-  // Handle file changes
+  // Handle left algorithm selection (comparison mode)
+  const handleLeftAlgorithmChange = (algorithmId) => {
+    setLeftAlgorithm(algorithmId);
+    setError(null);
+  };
+
+  // Handle right algorithm selection (comparison mode)
+  const handleRightAlgorithmChange = (algorithmId) => {
+    setRightAlgorithm(algorithmId);
+    setError(null);
+  };
+
+  // Update comparison parameters when algorithms change
+  React.useEffect(() => {
+    const newParams = {};
+    if (leftAlgorithm) {
+      newParams[leftAlgorithm] = AlgorithmRegistry.getDefaultParameters(leftAlgorithm);
+    }
+    if (rightAlgorithm) {
+      newParams[rightAlgorithm] = AlgorithmRegistry.getDefaultParameters(rightAlgorithm);
+    }
+    setComparisonParameters(newParams);
+  }, [leftAlgorithm, rightAlgorithm]);
+
+  // Handle file changes (step 2)
   const handleFileChange = (fileType, file) => {
     setFiles(prev => ({ ...prev, [fileType]: file }));
     setError(null);
@@ -78,43 +127,77 @@ const FileUpload = () => {
   };
 
   // Handle comparison parameter changes
-  const handleComparisonParameterChange = (algorithm, paramId, value) => {
-    setComparisonParams(prev => ({
+  const handleComparisonParameterChange = (algorithmId, paramId, value) => {
+    setComparisonParameters(prev => ({
       ...prev,
-      [algorithm]: {
-        ...prev[algorithm],
+      [algorithmId]: {
+        ...prev[algorithmId],
         [paramId]: value
       }
     }));
   };
 
-  // Generate file input fields dynamically from algorithm config
-  const renderFileInputs = (algorithm) => {
-    return algorithm.fileRequirements.types.map(fileType => {
+  // Get algorithms available for selected graph type (single mode)
+  const getAvailableAlgorithms = () => {
+    if (!selectedGraphType) return [];
+    try {
+      return GraphTypeManager.getAlgorithmsForGraphType(selectedGraphType).map(algorithmId => 
+        AlgorithmRegistry.getAlgorithm(algorithmId)
+      );
+    } catch (error) {
+      return [];
+    }
+  };
+
+  // Get file requirements for current graph type
+  const getFileRequirements = () => {
+    if (!selectedGraphType) return null;
+    try {
+      return GraphTypeManager.getGraphType(selectedGraphType).fileRequirements;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  // Get current algorithm config (single mode)
+  const getCurrentAlgorithm = () => {
+    if (!selectedAlgorithm) return null;
+    try {
+      return AlgorithmRegistry.getAlgorithm(selectedAlgorithm);
+    } catch (error) {
+      return null;
+    }
+  };
+
+  // Generate file input fields
+  const renderFileInputs = (fileRequirements) => {
+    if (!fileRequirements) return null;
+
+    return fileRequirements.types.map(fileType => {
       const fieldName = `${fileType}File`;
       
       return (
         <Form.Group key={fileType} className="mb-3">
           <Form.Label>
             {fileType.charAt(0).toUpperCase() + fileType.slice(1)} File
-            {algorithm.fileRequirements.naming && (
-              <small className="text-muted ms-2">(*_{fileType}.{algorithm.fileRequirements.extensions[0].replace('.', '')})</small>
+            {fileRequirements.naming && (
+              <small className="text-muted ms-2">(*_{fileType}.{fileRequirements.extensions[0].replace('.', '')})</small>
             )}
           </Form.Label>
           <Form.Control
             type="file"
-            accept={algorithm.fileRequirements.extensions.join(',')}
+            accept={fileRequirements.extensions.join(',')}
             onChange={(e) => handleFileChange(fieldName, e.target.files[0])}
           />
           <Form.Text className="text-muted">
-            {algorithm.fileRequirements.descriptions[fileType]}
+            {fileRequirements.descriptions[fileType]}
           </Form.Text>
         </Form.Group>
       );
     });
   };
 
-  // Generate parameter inputs dynamically from algorithm schema
+  // Generate parameter inputs
   const renderParameterInputs = (algorithm, currentParams, onParamChange) => {
     return algorithm.parameterSchema.map(param => (
       <Form.Group key={param.id} className="mb-3">
@@ -146,16 +229,21 @@ const FileUpload = () => {
     ));
   };
 
-  // Check if files are ready for processing
-  const areFilesReady = () => {
-    if (uploadMode === 'compare') {
-      // For comparison, need the 4 heterogeneous/SCAR files
-      const required = ['infoFile', 'linkFile', 'nodeFile', 'metaFile'];
-      return required.every(fileType => files[fileType]);
+  // Check if ready to process
+  const isReadyToProcess = () => {
+    if (!selectedGraphType) return false;
+    
+    const fileReqs = getFileRequirements();
+    if (!fileReqs) return false;
+
+    // Check if all required files are uploaded
+    const filesReady = fileReqs.types.every(type => files[`${type}File`]);
+    if (!filesReady) return false;
+
+    if (uploadMode === 'single') {
+      return selectedAlgorithm && Object.keys(parameters).length > 0;
     } else {
-      // For single mode, check based on selected algorithm
-      const requiredTypes = currentAlgorithm.fileRequirements.types;
-      return requiredTypes.every(type => files[`${type}File`]);
+      return leftAlgorithm && rightAlgorithm && leftAlgorithm !== rightAlgorithm && Object.keys(comparisonParameters).length === 2;
     }
   };
 
@@ -165,13 +253,16 @@ const FileUpload = () => {
     setError(null);
 
     try {
-      // Validate files using registry
+      const currentAlg = getCurrentAlgorithm();
+      if (!currentAlg) throw new Error('No algorithm selected');
+
+      // Validate files
       const fileValidation = AlgorithmRegistry.validateFiles(selectedAlgorithm, files);
       if (!fileValidation.valid) {
         throw new Error(fileValidation.error);
       }
 
-      // Validate parameters using registry
+      // Validate parameters
       const paramValidation = AlgorithmRegistry.validateParameters(selectedAlgorithm, parameters);
       if (!paramValidation.valid) {
         throw new Error(paramValidation.error);
@@ -228,45 +319,64 @@ const FileUpload = () => {
 
   // Process files for comparison mode
   const processComparisonMode = async () => {
+    if (!leftAlgorithm || !rightAlgorithm) {
+      setError('Please select both algorithms to compare');
+      return;
+    }
+
+    if (leftAlgorithm === rightAlgorithm) {
+      setError('Please select two different algorithms to compare');
+      return;
+    }
+
     setProcessing(true);
     setError(null);
 
     try {
-      // Validate files for comparison (needs heterogeneous files)
-      const heteroAlgorithm = AlgorithmRegistry.getAlgorithm('heterogeneous');
-      const fileValidation = heteroAlgorithm.validateFiles(files);
-      if (!fileValidation.valid) {
-        throw new Error(fileValidation.error);
+      const algorithm1 = AlgorithmRegistry.getAlgorithm(leftAlgorithm);
+      const algorithm2 = AlgorithmRegistry.getAlgorithm(rightAlgorithm);
+
+      // Validate files for both algorithms
+      const fileValidation1 = algorithm1.validateFiles(files);
+      if (!fileValidation1.valid) {
+        throw new Error(`${algorithm1.name}: ${fileValidation1.error}`);
+      }
+
+      const fileValidation2 = algorithm2.validateFiles(files);
+      if (!fileValidation2.valid) {
+        throw new Error(`${algorithm2.name}: ${fileValidation2.error}`);
       }
 
       // Validate parameters for both algorithms
-      const heteroValidation = AlgorithmRegistry.validateParameters('heterogeneous', comparisonParams.heterogeneous);
-      if (!heteroValidation.valid) {
-        throw new Error(`Heterogeneous params: ${heteroValidation.error}`);
+      const param1Validation = AlgorithmRegistry.validateParameters(leftAlgorithm, comparisonParameters[leftAlgorithm]);
+      if (!param1Validation.valid) {
+        throw new Error(`${algorithm1.name} params: ${param1Validation.error}`);
       }
 
-      const scarValidation = AlgorithmRegistry.validateParameters('scar', comparisonParams.scar);
-      if (!scarValidation.valid) {
-        throw new Error(`SCAR params: ${scarValidation.error}`);
+      const param2Validation = AlgorithmRegistry.validateParameters(rightAlgorithm, comparisonParameters[rightAlgorithm]);
+      if (!param2Validation.valid) {
+        throw new Error(`${algorithm2.name} params: ${param2Validation.error}`);
       }
 
       // Update app state
       actions.setMode('comparison');
       actions.setLoading(true);
-      actions.setProcessingStep('Running algorithm comparison...');
+      actions.setProcessingStep(`Running ${algorithm1.name} vs ${algorithm2.name} comparison...`);
       actions.setComparisonFiles(files);
 
       // Run comparison using DataService
-      const comparisonResult = await DataService.runComparison({
-        heterogeneous: {
+      const comparisonConfig = {
+        [leftAlgorithm]: {
           files: files,
-          parameters: comparisonParams.heterogeneous
+          parameters: comparisonParameters[leftAlgorithm]
         },
-        scar: {
+        [rightAlgorithm]: {
           files: files,
-          parameters: comparisonParams.scar
+          parameters: comparisonParameters[rightAlgorithm]
         }
-      });
+      };
+
+      const comparisonResult = await DataService.runComparison(comparisonConfig);
 
       if (!comparisonResult.success) {
         throw new Error(comparisonResult.message || 'Comparison failed');
@@ -280,7 +390,7 @@ const FileUpload = () => {
       // Close modal
       handleCloseModal();
       
-      console.log('✅ Comparison mode processing completed');
+      console.log(`✅ Comparison mode processing completed: ${algorithm1.name} vs ${algorithm2.name}`);
       
     } catch (err) {
       setError(err.message);
@@ -300,6 +410,34 @@ const FileUpload = () => {
     }
   };
 
+  // Get step description
+  const getStepDescription = () => {
+    if (!selectedGraphType) {
+      return "Select your graph type to continue";
+    }
+    
+    const fileReqs = getFileRequirements();
+    const filesUploaded = fileReqs ? fileReqs.types.every(type => files[`${type}File`]) : false;
+    
+    if (!filesUploaded) {
+      return "Upload your graph files";
+    }
+    
+    if (uploadMode === 'single' && !selectedAlgorithm) {
+      return "Select an algorithm to process your graph";
+    }
+    
+    if (uploadMode === 'compare' && (!leftAlgorithm || !rightAlgorithm)) {
+      return "Select algorithms for left and right comparison";
+    }
+    
+    if (uploadMode === 'compare' && leftAlgorithm === rightAlgorithm) {
+      return "Please select two different algorithms";
+    }
+    
+    return "Ready to process!";
+  };
+
   return (
     <>
       <Button variant="outline-light" onClick={handleShowModal} className="btn-upload">
@@ -315,10 +453,17 @@ const FileUpload = () => {
             <Alert variant="danger">{error}</Alert>
           )}
 
+          {/* Progress indicator */}
+          <div className="mb-3">
+            <small className="text-muted">
+              <strong>Step:</strong> {getStepDescription()}
+            </small>
+          </div>
+
           {/* Upload Mode Selection */}
           <Card className="mb-3">
             <Card.Header>
-              <h6 className="mb-0">Upload Mode</h6>
+              <h6 className="mb-0">Step 1: Upload Mode</h6>
             </Card.Header>
             <Card.Body>
               <ButtonGroup className="w-100">
@@ -326,134 +471,216 @@ const FileUpload = () => {
                   variant={uploadMode === 'single' ? 'primary' : 'outline-primary'}
                   onClick={() => handleUploadModeChange('single')}
                 >
-                  📊 Single Algorithm
+                  🔍 Single Algorithm
                 </Button>
                 <Button
                   variant={uploadMode === 'compare' ? 'primary' : 'outline-primary'}
                   onClick={() => handleUploadModeChange('compare')}
                 >
-                  🔄 Compare Algorithms
+                  ⚖️ Compare Algorithms
                 </Button>
               </ButtonGroup>
               <Form.Text className="text-muted mt-2">
                 {uploadMode === 'single' 
                   ? 'Run one algorithm and explore the results'
-                  : 'Run Heterogeneous vs SCAR algorithms and compare their clustering results'
+                  : 'Compare two algorithms on the same dataset'
                 }
               </Form.Text>
             </Card.Body>
           </Card>
 
-          {/* Single Algorithm Mode */}
-          {uploadMode === 'single' && (
-            <>
-              {/* Algorithm Selection */}
-              <Card className="mb-3">
-                <Card.Header>
-                  <h6 className="mb-0">Algorithm Selection</h6>
-                </Card.Header>
-                <Card.Body>
-                  <Form.Group>
-                    <Form.Label>Processing Algorithm</Form.Label>
-                    <Form.Select value={selectedAlgorithm} onChange={(e) => handleAlgorithmChange(e.target.value)}>
-                      {availableAlgorithms.map(algorithm => (
-                        <option key={algorithm.id} value={algorithm.id}>
-                          {algorithm.name}
-                        </option>
-                      ))}
-                    </Form.Select>
-                    <Form.Text className="text-muted">
-                      {currentAlgorithm.description}
-                    </Form.Text>
-                  </Form.Group>
-                </Card.Body>
-              </Card>
+          {/* Graph Type Selection */}
+          <Card className="mb-3">
+            <Card.Header>
+              <h6 className="mb-0">Step 2: Graph Type</h6>
+            </Card.Header>
+            <Card.Body>
+              <Form.Group>
+                <Form.Label>Select your graph type</Form.Label>
+                <Form.Select 
+                  value={selectedGraphType} 
+                  onChange={(e) => handleGraphTypeChange(e.target.value)}
+                >
+                  <option value="">Choose graph type...</option>
+                  {availableGraphTypes.map(graphType => (
+                    <option key={graphType.id} value={graphType.id}>
+                      {graphType.name}
+                    </option>
+                  ))}
+                </Form.Select>
+                {selectedGraphType && (
+                  <Form.Text className="text-muted">
+                    {GraphTypeManager.getGraphType(selectedGraphType).description}
+                  </Form.Text>
+                )}
+              </Form.Group>
+            </Card.Body>
+          </Card>
 
-              {/* File Upload Section */}
-              <Card className="mb-3">
-                <Card.Header>
-                  <h6 className="mb-0">
-                    Required Files 
-                    <Badge bg="info" className="ms-2">{currentAlgorithm.fileRequirements.count} files</Badge>
-                  </h6>
-                </Card.Header>
-                <Card.Body>
-                  {currentAlgorithm.fileRequirements.naming && (
-                    <Alert variant="info" className="mb-3">
-                      <small>
-                        <strong>File naming convention:</strong> {currentAlgorithm.fileRequirements.naming}
-                      </small>
-                    </Alert>
-                  )}
-                  {renderFileInputs(currentAlgorithm)}
-                </Card.Body>
-              </Card>
-
-              {/* Parameters Section */}
-              <Card className="mb-3">
-                <Card.Header>
-                  <h6 className="mb-0">Algorithm Parameters</h6>
-                </Card.Header>
-                <Card.Body>
-                  {renderParameterInputs(currentAlgorithm, parameters, handleParameterChange)}
-                </Card.Body>
-              </Card>
-            </>
-          )}
-
-          {/* Comparison Mode */}
-          {uploadMode === 'compare' && (
-            <>
-              {/* File Upload for Comparison */}
-              <Card className="mb-3">
-                <Card.Header>
-                  <h6 className="mb-0">
-                    Dataset Files <Badge bg="warning">4 files required</Badge>
-                  </h6>
-                </Card.Header>
-                <Card.Body>
+          {/* File Upload Section */}
+          {selectedGraphType && (
+            <Card className="mb-3">
+              <Card.Header>
+                <h6 className="mb-0">
+                  Step 3: Upload Files 
+                  <Badge bg="info" className="ms-2">
+                    {getFileRequirements()?.count} files required
+                  </Badge>
+                </h6>
+              </Card.Header>
+              <Card.Body>
+                {getFileRequirements()?.naming && (
                   <Alert variant="info" className="mb-3">
                     <small>
-                      <strong>📊 Comparison Note:</strong> Both algorithms will use the same dataset files.<br/>
-                      <strong>File naming:</strong> datasetName_type.dat (e.g., amazon_info.dat)
+                      <strong>File naming convention:</strong> {getFileRequirements().naming}
                     </small>
                   </Alert>
-                  {renderFileInputs(AlgorithmRegistry.getAlgorithm('heterogeneous'))}
-                </Card.Body>
-              </Card>
+                )}
+                {renderFileInputs(getFileRequirements())}
+              </Card.Body>
+            </Card>
+          )}
 
-              {/* Algorithm Parameters for Comparison */}
-              <Row>
-                <Col md={6}>
+          {/* Algorithm Selection and Parameters */}
+          {selectedGraphType && getFileRequirements()?.types.every(type => files[`${type}File`]) && (
+            <>
+              {/* Single Algorithm Mode */}
+              {uploadMode === 'single' && (
+                <>
+                  {/* Algorithm Selection */}
                   <Card className="mb-3">
                     <Card.Header>
-                      <h6 className="mb-0">🟢 Heterogeneous Algorithm</h6>
+                      <h6 className="mb-0">Step 4: Algorithm Selection</h6>
                     </Card.Header>
                     <Card.Body>
-                      {renderParameterInputs(
-                        AlgorithmRegistry.getAlgorithm('heterogeneous'),
-                        comparisonParams.heterogeneous,
-                        (paramId, value) => handleComparisonParameterChange('heterogeneous', paramId, value)
+                      <Form.Group>
+                        <Form.Label>Choose Algorithm</Form.Label>
+                        <Form.Select value={selectedAlgorithm} onChange={(e) => handleAlgorithmChange(e.target.value)}>
+                          <option value="">Select algorithm...</option>
+                          {getAvailableAlgorithms().map(algorithm => (
+                            <option key={algorithm.id} value={algorithm.id}>
+                              {algorithm.name}
+                            </option>
+                          ))}
+                        </Form.Select>
+                        {selectedAlgorithm && (
+                          <Form.Text className="text-muted">
+                            {getCurrentAlgorithm()?.description}
+                          </Form.Text>
+                        )}
+                      </Form.Group>
+                    </Card.Body>
+                  </Card>
+
+                  {/* Parameters */}
+                  {selectedAlgorithm && (
+                    <Card className="mb-3">
+                      <Card.Header>
+                        <h6 className="mb-0">Step 5: Algorithm Parameters</h6>
+                      </Card.Header>
+                      <Card.Body>
+                        {renderParameterInputs(getCurrentAlgorithm(), parameters, handleParameterChange)}
+                      </Card.Body>
+                    </Card>
+                  )}
+                </>
+              )}
+
+              {/* Comparison Mode */}
+              {uploadMode === 'compare' && (
+                <>
+                  {/* Algorithm Selection */}
+                  <Card className="mb-3">
+                    <Card.Header>
+                      <h6 className="mb-0">Step 4: Select Algorithms to Compare</h6>
+                    </Card.Header>
+                    <Card.Body>
+                      {getAvailableAlgorithms().length >= 2 ? (
+                        <Row>
+                          <Col md={6}>
+                            <Form.Group>
+                              <Form.Label>🔵 Left Algorithm</Form.Label>
+                              <Form.Select 
+                                value={leftAlgorithm} 
+                                onChange={(e) => handleLeftAlgorithmChange(e.target.value)}
+                              >
+                                <option value="">Select left algorithm...</option>
+                                {getAvailableAlgorithms().map(algorithm => (
+                                  <option key={algorithm.id} value={algorithm.id}>
+                                    {algorithm.name}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+
+                          <Col md={6}>
+                            <Form.Group>
+                              <Form.Label>🔴 Right Algorithm</Form.Label>
+                              <Form.Select 
+                                value={rightAlgorithm} 
+                                onChange={(e) => handleRightAlgorithmChange(e.target.value)}
+                              >
+                                <option value="">Select right algorithm...</option>
+                                {getAvailableAlgorithms().map(algorithm => (
+                                  <option 
+                                    key={algorithm.id} 
+                                    value={algorithm.id}
+                                    disabled={algorithm.id === leftAlgorithm}
+                                  >
+                                    {algorithm.name}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                        </Row>
+                      ) : (
+                        <Alert variant="warning">
+                          No algorithm pairs available for comparison with {GraphTypeManager.getGraphType(selectedGraphType).name} graphs.
+                          You need at least 2 algorithms that support the same graph type.
+                        </Alert>
+                      )}
+
+                      {leftAlgorithm === rightAlgorithm && leftAlgorithm && (
+                        <Alert variant="warning" className="mt-2">
+                          Please select two different algorithms to compare.
+                        </Alert>
                       )}
                     </Card.Body>
                   </Card>
-                </Col>
 
-                <Col md={6}>
-                  <Card className="mb-3">
-                    <Card.Header>
-                      <h6 className="mb-0">🟡 SCAR Algorithm</h6>
-                    </Card.Header>
-                    <Card.Body>
-                      {renderParameterInputs(
-                        AlgorithmRegistry.getAlgorithm('scar'),
-                        comparisonParams.scar,
-                        (paramId, value) => handleComparisonParameterChange('scar', paramId, value)
-                      )}
-                    </Card.Body>
-                  </Card>
-                </Col>
-              </Row>
+                  {/* Algorithm Parameters for Comparison */}
+                  {leftAlgorithm && rightAlgorithm && leftAlgorithm !== rightAlgorithm && (
+                    <Card className="mb-3">
+                      <Card.Header>
+                        <h6 className="mb-0">Step 5: Algorithm Parameters</h6>
+                      </Card.Header>
+                      <Card.Body>
+                        <Row>
+                          <Col md={6}>
+                            <h6>🔵 {AlgorithmRegistry.getAlgorithm(leftAlgorithm).name}</h6>
+                            {renderParameterInputs(
+                              AlgorithmRegistry.getAlgorithm(leftAlgorithm),
+                              comparisonParameters[leftAlgorithm] || {},
+                              (paramId, value) => handleComparisonParameterChange(leftAlgorithm, paramId, value)
+                            )}
+                          </Col>
+
+                          <Col md={6}>
+                            <h6>🔴 {AlgorithmRegistry.getAlgorithm(rightAlgorithm).name}</h6>
+                            {renderParameterInputs(
+                              AlgorithmRegistry.getAlgorithm(rightAlgorithm),
+                              comparisonParameters[rightAlgorithm] || {},
+                              (paramId, value) => handleComparisonParameterChange(rightAlgorithm, paramId, value)
+                            )}
+                          </Col>
+                        </Row>
+                      </Card.Body>
+                    </Card>
+                  )}
+                </>
+              )}
             </>
           )}
         </Modal.Body>
@@ -466,7 +693,7 @@ const FileUpload = () => {
           <Button 
             variant={uploadMode === 'compare' ? 'warning' : 'primary'}
             onClick={processFiles}
-            disabled={processing || loading || !areFilesReady()}
+            disabled={processing || loading || !isReadyToProcess()}
           >
             {processing ? (
               <>
@@ -478,10 +705,15 @@ const FileUpload = () => {
                   aria-hidden="true"
                   className="me-2"
                 />
-                {uploadMode === 'compare' ? 'Running Comparison...' : `Processing ${currentAlgorithm.name}...`}
+                {uploadMode === 'compare' 
+                  ? 'Running Comparison...' 
+                  : `Processing ${selectedAlgorithm}...`
+                }
               </>
             ) : (
-              uploadMode === 'compare' ? '🔄 Compare Algorithms' : `📊 Process ${currentAlgorithm.name}`
+              uploadMode === 'compare' 
+                ? `⚖️ Compare Algorithms` 
+                : `🔍 Process with ${selectedAlgorithm ? getCurrentAlgorithm()?.name : 'Algorithm'}`
             )}
           </Button>
         </Modal.Footer>

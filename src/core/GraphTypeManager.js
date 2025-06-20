@@ -1,7 +1,3 @@
-/**
- * Graph Type Management System
- * Separates homogeneous and heterogeneous graph handling
- */
 class GraphTypeManager {
   constructor() {
     this.graphTypes = new Map();

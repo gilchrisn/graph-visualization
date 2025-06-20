@@ -1,3 +1,5 @@
+import GraphTypeManager from './GraphTypeManager';
+
 class AlgorithmRegistry {
   constructor() {
     this.algorithms = new Map();
@@ -35,11 +37,93 @@ class AlgorithmRegistry {
   }
 
   /**
-   * Get algorithms that support comparison
+   * Get algorithms by graph type
+   */
+  getAlgorithmsByGraphType(graphTypeId) {
+    try {
+      return GraphTypeManager.getAlgorithmsForGraphType(graphTypeId);
+    } catch (error) {
+      console.warn(`No algorithms found for graph type: ${graphTypeId}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get algorithms that support comparison (have more than one algorithm for same graph type)
    */
   getComparisonAlgorithms() {
-    return Array.from(this.algorithms.values())
-      .filter(alg => alg.supportsComparison);
+    const comparableAlgorithms = [];
+    
+    // Get all graph types
+    const graphTypes = GraphTypeManager.getAllGraphTypes();
+    
+    for (const graphType of graphTypes) {
+      const algorithms = GraphTypeManager.getAlgorithmsForGraphType(graphType.id);
+      
+      // If there are multiple algorithms for this graph type, they can be compared
+      if (algorithms.length > 1) {
+        algorithms.forEach(algorithmId => {
+          const algorithm = this.algorithms.get(algorithmId);
+          if (algorithm) {
+            comparableAlgorithms.push({
+              ...algorithm,
+              graphType: graphType.id,
+              graphTypeName: graphType.name
+            });
+          }
+        });
+      }
+    }
+    
+    return comparableAlgorithms;
+  }
+
+  /**
+   * Get available comparison pairs
+   */
+  getComparisonPairs() {
+    const pairs = [];
+    const graphTypes = GraphTypeManager.getAllGraphTypes();
+    
+    for (const graphType of graphTypes) {
+      const graphTypePairs = GraphTypeManager.getComparisonPairs(graphType.id);
+      
+      for (const pair of graphTypePairs) {
+        const algorithm1 = this.algorithms.get(pair.algorithm1);
+        const algorithm2 = this.algorithms.get(pair.algorithm2);
+        
+        if (algorithm1 && algorithm2) {
+          pairs.push({
+            algorithm1: algorithm1,
+            algorithm2: algorithm2,
+            graphType: graphType.id,
+            graphTypeName: graphType.name,
+            pairId: `${pair.algorithm1}_vs_${pair.algorithm2}`
+          });
+        }
+      }
+    }
+    
+    return pairs;
+  }
+
+  /**
+   * Check if two algorithms are compatible for comparison
+   */
+  areAlgorithmsCompatible(algorithm1Id, algorithm2Id) {
+    return GraphTypeManager.areAlgorithmsCompatible(algorithm1Id, algorithm2Id);
+  }
+
+  /**
+   * Get graph type for an algorithm
+   */
+  getGraphTypeForAlgorithm(algorithmId) {
+    try {
+      return GraphTypeManager.getGraphTypeByAlgorithm(algorithmId);
+    } catch (error) {
+      console.warn(`Could not determine graph type for algorithm: ${algorithmId}`);
+      return null;
+    }
   }
 
   /**
@@ -75,11 +159,14 @@ class AlgorithmRegistry {
   }
 
   /**
-   * Check if algorithm supports comparison mode
+   * Check if algorithm supports comparison mode (has compatible algorithms)
    */
   supportsComparison(algorithmId) {
-    const algorithm = this.getAlgorithm(algorithmId);
-    return algorithm.supportsComparison;
+    const graphType = this.getGraphTypeForAlgorithm(algorithmId);
+    if (!graphType) return false;
+    
+    const algorithms = GraphTypeManager.getAlgorithmsForGraphType(graphType.id);
+    return algorithms.length > 1; // Can compare if there are multiple algorithms for same graph type
   }
 
   // Private methods
@@ -95,7 +182,6 @@ class AlgorithmRegistry {
       name: 'Homogeneous Graph Processing',
       description: 'Traditional graph processing with edge list and attributes',
       category: 'traditional',
-      supportsComparison: false,
       
       fileRequirements: {
         count: 2,
@@ -149,7 +235,6 @@ class AlgorithmRegistry {
       name: 'Heterogeneous Graph Processing',
       description: 'Multi-type network processing with specialized files',
       category: 'advanced',
-      supportsComparison: true,
       
       fileRequirements: {
         count: 4,
@@ -232,7 +317,6 @@ class AlgorithmRegistry {
       name: 'SCAR Algorithm',
       description: 'SCAR algorithm with advanced parameters',
       category: 'advanced',
-      supportsComparison: true,
       
       fileRequirements: {
         count: 4,

@@ -10,59 +10,50 @@ const ComparisonModeView = () => {
   const { loading, error, processingStep } = useLoadingState();
   const { comparisonData, comparisonMetrics, comparisonState, comparisonFiles } = useComparisonState();
 
-  React.useEffect(() => {
-    console.log('ComparisonModeView - comparisonFiles:', comparisonFiles);
-    if (comparisonFiles) {
-      console.log('Files object keys:', Object.keys(comparisonFiles));
-      Object.entries(comparisonFiles).forEach(([key, file]) => {
-        console.log(`${key}:`, file ? file.name : 'null');
-      });
-    }
-  }, [comparisonFiles]);
+  // Extract algorithm IDs dynamically from comparison data
+  const algorithm1Id = comparisonData ? Object.keys(comparisonData)[0] : null;
+  const algorithm2Id = comparisonData ? Object.keys(comparisonData)[1] : null;
+  
+  // Get algorithm configurations
+  const algorithm1Config = algorithm1Id ? AlgorithmRegistry.getAlgorithm(algorithm1Id) : null;
+  const algorithm2Config = algorithm2Id ? AlgorithmRegistry.getAlgorithm(algorithm2Id) : null;
 
-  // Local parameter state for each algorithm
-  const [heteroParams, setHeteroParams] = useState({
-    k: comparisonData?.heterogeneous?.parameters?.k || 25
-  });
-  const [scarParams, setScarParams] = useState({
-    k: comparisonData?.scar?.parameters?.k || 25,
-    nk: comparisonData?.scar?.parameters?.nk || 10,
-    th: comparisonData?.scar?.parameters?.th || 0.5
-  });
+  // Local parameter state for each algorithm (dynamic)
+  const [algorithmParameters, setAlgorithmParameters] = useState({});
 
   // Individual algorithm data state
-  const [algorithmData, setAlgorithmData] = useState({
-    heterogeneous: {
-      hierarchyData: {},
-      mappingData: {},
-      nodeStatistics: null
-    },
-    scar: {
-      hierarchyData: {},
-      mappingData: {},
-      nodeStatistics: null
+  const [algorithmData, setAlgorithmData] = useState({});
+
+  // Initialize parameters when comparison data changes
+  useEffect(() => {
+    if (comparisonData && algorithm1Id && algorithm2Id) {
+      const newParams = {};
+      newParams[algorithm1Id] = comparisonData[algorithm1Id]?.parameters || AlgorithmRegistry.getDefaultParameters(algorithm1Id);
+      newParams[algorithm2Id] = comparisonData[algorithm2Id]?.parameters || AlgorithmRegistry.getDefaultParameters(algorithm2Id);
+      
+      setAlgorithmParameters(newParams);
+
+      // Initialize algorithm data structure
+      const newAlgorithmData = {};
+      newAlgorithmData[algorithm1Id] = {
+        hierarchyData: {},
+        mappingData: {},
+        nodeStatistics: null
+      };
+      newAlgorithmData[algorithm2Id] = {
+        hierarchyData: {},
+        mappingData: {},
+        nodeStatistics: null
+      };
+      setAlgorithmData(newAlgorithmData);
     }
-  });
+  }, [comparisonData, algorithm1Id, algorithm2Id]);
 
   // Initialize comparison view when comparisonData is available
   useEffect(() => {
-    if (comparisonData && comparisonData.heterogeneous && comparisonData.scar) {
-      console.log('🔄 Initializing comparison view...');
+    if (comparisonData && algorithm1Id && algorithm2Id) {
+      console.log(`⚖️ Initializing comparison view: ${algorithm1Id} vs ${algorithm2Id}`);
       initializeComparisonView();
-    }
-  }, [comparisonData]);
-
-  // Update local parameters when comparison data changes
-  useEffect(() => {
-    if (comparisonData) {
-      setHeteroParams({
-        k: comparisonData.heterogeneous?.parameters?.k || 25
-      });
-      setScarParams({
-        k: comparisonData.scar?.parameters?.k || 25,
-        nk: comparisonData.scar?.parameters?.nk || 10,
-        th: comparisonData.scar?.parameters?.th || 0.5
-      });
     }
   }, [comparisonData]);
 
@@ -74,24 +65,24 @@ const ComparisonModeView = () => {
     try {
       // Load hierarchy data for both algorithms
       await Promise.all([
-        loadAlgorithmHierarchy('heterogeneous'),
-        loadAlgorithmHierarchy('scar')
+        loadAlgorithmHierarchy(algorithm1Id),
+        loadAlgorithmHierarchy(algorithm2Id)
       ]);
 
-      // Load data for heterogeneous algorithm
+      // Load data for first algorithm
       await loadSupernodeData(
-        'heterogeneous',
-        comparisonData.heterogeneous.datasetId,
-        comparisonData.heterogeneous.parameters,
-        comparisonData.heterogeneous.rootNode
+        algorithm1Id,
+        comparisonData[algorithm1Id].datasetId,
+        comparisonData[algorithm1Id].parameters,
+        comparisonData[algorithm1Id].rootNode
       );
 
-      // Load data for SCAR algorithm
+      // Load data for second algorithm
       await loadSupernodeData(
-        'scar',
-        comparisonData.scar.datasetId,
-        comparisonData.scar.parameters,
-        comparisonData.scar.rootNode
+        algorithm2Id,
+        comparisonData[algorithm2Id].datasetId,
+        comparisonData[algorithm2Id].parameters,
+        comparisonData[algorithm2Id].rootNode
       );
 
       console.log('✅ Comparison view initialized successfully');
@@ -103,13 +94,13 @@ const ComparisonModeView = () => {
   };
 
   // Load hierarchy data for a specific algorithm
-  const loadAlgorithmHierarchy = async (algorithm) => {
+  const loadAlgorithmHierarchy = async (algorithmId) => {
     try {
-      const algorithmConfig = comparisonData[algorithm];
+      const algorithmConfig = comparisonData[algorithmId];
       if (!algorithmConfig) return;
 
       const hierarchyResult = await DataService.getHierarchyData(
-        algorithm,
+        algorithmId,
         algorithmConfig.datasetId,
         algorithmConfig.parameters
       );
@@ -117,54 +108,54 @@ const ComparisonModeView = () => {
       if (hierarchyResult.success) {
         setAlgorithmData(prev => ({
           ...prev,
-          [algorithm]: {
-            ...prev[algorithm],
+          [algorithmId]: {
+            ...prev[algorithmId],
             hierarchyData: hierarchyResult.hierarchy,
             mappingData: hierarchyResult.mapping
           }
         }));
       }
     } catch (err) {
-      console.error(`Error loading ${algorithm} hierarchy:`, err);
+      console.error(`Error loading ${algorithmId} hierarchy:`, err);
     }
   };
 
   // Load data for a specific algorithm and supernode
-  const loadSupernodeData = async (algorithm, datasetId, parameters, supernodeId) => {
+  const loadSupernodeData = async (algorithmId, datasetId, parameters, supernodeId) => {
     if (!datasetId || !supernodeId) {
-      console.warn(`Missing data for ${algorithm}: datasetId=${datasetId}, supernodeId=${supernodeId}`);
+      console.warn(`Missing data for ${algorithmId}: datasetId=${datasetId}, supernodeId=${supernodeId}`);
       return;
     }
 
-    actions.setProcessingStep(`Loading ${algorithm} supernode ${supernodeId}...`);
+    actions.setProcessingStep(`Loading ${algorithmId} supernode ${supernodeId}...`);
 
     try {
-      const response = await DataService.getSupernodeData(algorithm, datasetId, supernodeId, parameters);
+      const response = await DataService.getSupernodeData(algorithmId, datasetId, supernodeId, parameters);
 
       if (!response.success) {
-        throw new Error(response.message || `Failed to get ${algorithm} supernode data`);
+        throw new Error(response.message || `Failed to get ${algorithmId} supernode data`);
       }
 
       if (!response.nodes || !Array.isArray(response.nodes) || response.nodes.length === 0) {
-        throw new Error(`No nodes received for ${algorithm} algorithm`);
+        throw new Error(`No nodes received for ${algorithmId} algorithm`);
       }
 
       // Update comparison state for this algorithm
-      actions.updateComparisonState(algorithm, {
+      actions.updateComparisonState(algorithmId, {
         cytoscapeElements: response.nodes,
         currentSupernode: supernodeId,
-        breadcrumbPath: updateBreadcrumbPath(algorithm, supernodeId)
+        breadcrumbPath: updateBreadcrumbPath(algorithmId, supernodeId)
       });
 
     } catch (err) {
-      actions.setError(`Error loading ${algorithm} supernode data: ${err.message}`);
-      console.error(`Error loading ${algorithm} supernode data:`, err);
+      actions.setError(`Error loading ${algorithmId} supernode data: ${err.message}`);
+      console.error(`Error loading ${algorithmId} supernode data:`, err);
     }
   };
 
   // Update breadcrumb path for an algorithm
-  const updateBreadcrumbPath = (algorithm, supernodeId) => {
-    const currentPath = comparisonState[algorithm]?.breadcrumbPath || [];
+  const updateBreadcrumbPath = (algorithmId, supernodeId) => {
+    const currentPath = comparisonState[algorithmId]?.breadcrumbPath || [];
     
     // If this supernode is already in the path, truncate to that point
     const existingIndex = currentPath.findIndex(item => item.id === supernodeId);
@@ -178,23 +169,23 @@ const ComparisonModeView = () => {
   };
 
   // Navigate via breadcrumb for a specific algorithm
-  const navigateViaBreadcrumb = (algorithm, index) => {
-    const algorithmConfig = comparisonData[algorithm];
-    const breadcrumbPath = comparisonState[algorithm]?.breadcrumbPath || [];
+  const navigateViaBreadcrumb = (algorithmId, index) => {
+    const algorithmConfig = comparisonData[algorithmId];
+    const breadcrumbPath = comparisonState[algorithmId]?.breadcrumbPath || [];
     
     if (index >= 0 && index < breadcrumbPath.length && algorithmConfig) {
       const targetSupernode = breadcrumbPath[index].id;
       
       // Update the breadcrumb path (truncate to the selected index)
       const newPath = breadcrumbPath.slice(0, index + 1);
-      actions.updateComparisonState(algorithm, {
+      actions.updateComparisonState(algorithmId, {
         breadcrumbPath: newPath,
         currentSupernode: targetSupernode
       });
       
       // Load the supernode data
       loadSupernodeData(
-        algorithm,
+        algorithmId,
         algorithmConfig.datasetId,
         algorithmConfig.parameters,
         targetSupernode
@@ -203,28 +194,28 @@ const ComparisonModeView = () => {
   };
 
   // Handle node click for specific algorithm
-  const handleNodeClick = (algorithm) => {
+  const handleNodeClick = (algorithmId) => {
     return async (nodeData) => {
-      console.log(`${algorithm} node clicked:`, nodeData);
+      console.log(`${algorithmId} node clicked:`, nodeData);
 
       // Update selected node for this algorithm
-      actions.updateComparisonState(algorithm, {
+      actions.updateComparisonState(algorithmId, {
         selectedNode: nodeData
       });
 
       // Load node statistics
-      await loadNodeStatistics(algorithm, nodeData.id);
+      await loadNodeStatistics(algorithmId, nodeData.id);
     };
   };
 
   // Load node statistics for a specific algorithm
-  const loadNodeStatistics = async (algorithm, nodeId) => {
-    const algorithmConfig = comparisonData[algorithm];
+  const loadNodeStatistics = async (algorithmId, nodeId) => {
+    const algorithmConfig = comparisonData[algorithmId];
     if (!algorithmConfig || !nodeId) return;
     
     try {
       const response = await DataService.getNodeStatistics(
-        algorithm,
+        algorithmId,
         algorithmConfig.datasetId,
         nodeId,
         algorithmConfig.parameters
@@ -233,137 +224,154 @@ const ComparisonModeView = () => {
       if (response.success) {
         setAlgorithmData(prev => ({
           ...prev,
-          [algorithm]: {
-            ...prev[algorithm],
+          [algorithmId]: {
+            ...prev[algorithmId],
             nodeStatistics: response.statistics
           }
         }));
       }
     } catch (err) {
-      console.error(`Error loading ${algorithm} node statistics:`, err);
+      console.error(`Error loading ${algorithmId} node statistics:`, err);
     }
   };
 
   // Navigate to supernode for specific algorithm
-  const navigateToSupernode = async (algorithm, supernodeId) => {
+  const navigateToSupernode = async (algorithmId, supernodeId) => {
     if (!supernodeId || !comparisonData) return;
 
-    const algorithmData = comparisonData[algorithm];
-    if (!algorithmData) return;
+    const algorithmDataConfig = comparisonData[algorithmId];
+    if (!algorithmDataConfig) return;
 
     try {
       await loadSupernodeData(
-        algorithm,
-        algorithmData.datasetId,
-        algorithmData.parameters,
+        algorithmId,
+        algorithmDataConfig.datasetId,
+        algorithmDataConfig.parameters,
         supernodeId
       );
     } catch (err) {
-      actions.setError(`Error navigating ${algorithm} to supernode: ${err.message}`);
+      actions.setError(`Error navigating ${algorithmId} to supernode: ${err.message}`);
     }
   };
 
-  // Apply parameter changes for heterogeneous algorithm
-  const applyHeteroParams = async () => {
-    if (!comparisonData?.heterogeneous || !comparisonFiles) {
-      console.error('Missing comparison data or files');
+  // Handle parameter changes for any algorithm
+  const handleParameterChange = (algorithmId, paramId, value) => {
+    setAlgorithmParameters(prev => ({
+      ...prev,
+      [algorithmId]: {
+        ...prev[algorithmId],
+        [paramId]: value
+      }
+    }));
+  };
+
+  // Apply parameter changes for any algorithm
+  const applyParameterChanges = async (algorithmId) => {
+    if (!comparisonData?.[algorithmId] || !comparisonFiles) {
+      console.error(`Missing comparison data or files for ${algorithmId}`);
       actions.setError('Missing comparison data or original files');
       return;
     }
     
     actions.setLoading(true);
-    actions.setProcessingStep('Updating Heterogeneous parameters...');
+    actions.setProcessingStep(`Updating ${algorithmId} parameters...`);
     
     try {
+      const newParameters = algorithmParameters[algorithmId];
+      
       // Validate parameters
-      const validation = AlgorithmRegistry.validateParameters('heterogeneous', heteroParams);
+      const validation = AlgorithmRegistry.validateParameters(algorithmId, newParameters);
       if (!validation.valid) {
         throw new Error(validation.error);
       }
 
       // Reprocess with new parameters
-      const processResult = await DataService.processDataset('heterogeneous', comparisonFiles, heteroParams);
+      const processResult = await DataService.processDataset(algorithmId, comparisonFiles, newParameters);
       
       if (!processResult.success) {
         throw new Error(processResult.message || 'Failed to process with new parameters');
       }
       
       // Reload hierarchy data
-      await loadAlgorithmHierarchy('heterogeneous');
+      await loadAlgorithmHierarchy(algorithmId);
       
       // Load root supernode with new parameters
       const rootNode = processResult.result?.rootNode || 'c0_l3_0';
       await loadSupernodeData(
-        'heterogeneous',
-        processResult.result?.datasetId || comparisonData.heterogeneous.datasetId,
-        heteroParams,
+        algorithmId,
+        processResult.result?.datasetId || comparisonData[algorithmId].datasetId,
+        newParameters,
         rootNode
       );
       
       // Reset breadcrumb
-      actions.updateComparisonState('heterogeneous', {
+      actions.updateComparisonState(algorithmId, {
         breadcrumbPath: [{ id: rootNode, label: rootNode }]
       });
       
     } catch (err) {
-      actions.setError(`Error updating Heterogeneous parameters: ${err.message}`);
+      actions.setError(`Error updating ${algorithmId} parameters: ${err.message}`);
     } finally {
       actions.setLoading(false);
     }
   };
 
-  // Apply parameter changes for SCAR algorithm
-  const applyScarParams = async () => {
-    console.log('applyScarParams called');
-    console.log('comparisonData?.scar:', !!comparisonData?.scar);
-    console.log('comparisonFiles:', !!comparisonFiles);
-    console.log('comparisonFiles content:', comparisonFiles);
+  // Check if parameters have changed for an algorithm
+  const hasParametersChanged = (algorithmId) => {
+    if (!comparisonData?.[algorithmId] || !algorithmParameters[algorithmId]) return false;
     
-    if (!comparisonData?.scar || !comparisonFiles) {
-      console.error('Missing comparison data or files');
-      actions.setError('Missing comparison data or original files');
-      return;
-    }
+    const original = comparisonData[algorithmId].parameters;
+    const current = algorithmParameters[algorithmId];
     
-    actions.setLoading(true);
-    actions.setProcessingStep('Updating SCAR parameters...');
-    
-    try {
-      // Validate parameters
-      const validation = AlgorithmRegistry.validateParameters('scar', scarParams);
-      if (!validation.valid) {
-        throw new Error(validation.error);
-      }
+    return Object.keys(current).some(key => current[key] !== original[key]);
+  };
 
-      // Reprocess with new parameters
-      const processResult = await DataService.processDataset('scar', comparisonFiles, scarParams);
-      
-      if (!processResult.success) {
-        throw new Error(processResult.message || 'Failed to process with new parameters');
-      }
-      
-      // Reload hierarchy data
-      await loadAlgorithmHierarchy('scar');
-      
-      // Load root supernode with new parameters
-      const rootNode = processResult.result?.rootNode || 'c0_l3_0';
-      await loadSupernodeData(
-        'scar',
-        processResult.result?.datasetId || comparisonData.scar.datasetId,
-        scarParams,
-        rootNode
-      );
-      
-      // Reset breadcrumb
-      actions.updateComparisonState('scar', {
-        breadcrumbPath: [{ id: rootNode, label: rootNode }]
-      });
-      
-    } catch (err) {
-      actions.setError(`Error updating SCAR parameters: ${err.message}`);
-    } finally {
-      actions.setLoading(false);
+  // Get algorithm badge variant
+  const getAlgorithmBadge = (algorithmId) => {
+    switch (algorithmId) {
+      case 'homogeneous': return 'success';
+      case 'heterogeneous': return 'info';
+      case 'scar': return 'warning';
+      default: return 'primary';
     }
+  };
+
+  // Render parameter inputs for an algorithm
+  const renderParameterInputs = (algorithmId, algorithmConfig) => {
+    if (!algorithmConfig || !algorithmParameters[algorithmId]) return null;
+
+    return algorithmConfig.parameterSchema.map(param => (
+      <Form.Group key={param.id} className="mb-2">
+        <Form.Label className="small">{param.name}:</Form.Label>
+        {param.type === 'number' ? (
+          <Form.Control 
+            type="number" 
+            size="sm"
+            value={algorithmParameters[algorithmId][param.id] || param.default}
+            min={param.min}
+            max={param.max}
+            onChange={(e) => handleParameterChange(algorithmId, param.id, parseInt(e.target.value) || param.default)}
+          />
+        ) : param.type === 'range' ? (
+          <Form.Control 
+            type="number" 
+            size="sm"
+            value={algorithmParameters[algorithmId][param.id] || param.default}
+            min={param.min}
+            max={param.max}
+            step={param.step}
+            onChange={(e) => handleParameterChange(algorithmId, param.id, parseFloat(e.target.value) || param.default)}
+          />
+        ) : (
+          <Form.Control 
+            type="text" 
+            size="sm"
+            value={algorithmParameters[algorithmId][param.id] || param.default}
+            onChange={(e) => handleParameterChange(algorithmId, param.id, e.target.value)}
+          />
+        )}
+      </Form.Group>
+    ));
   };
 
   // Render loading state
@@ -389,6 +397,15 @@ const ComparisonModeView = () => {
     );
   }
 
+  // Render no data state
+  if (!comparisonData || !algorithm1Id || !algorithm2Id) {
+    return (
+      <Alert variant="info" className="mt-3">
+        No comparison data available. Please run a comparison from the upload dialog.
+      </Alert>
+    );
+  }
+
   return (
     <div className="comparison-view">
       {/* Mode Header */}
@@ -400,7 +417,7 @@ const ComparisonModeView = () => {
                 <div>
                   <Badge bg="warning" className="me-2">Comparison Mode</Badge>
                   <small className="text-muted">
-                    Comparing Heterogeneous vs SCAR algorithms
+                    Comparing {algorithm1Config?.name} vs {algorithm2Config?.name}
                   </small>
                 </div>
                 <Button 
@@ -408,7 +425,7 @@ const ComparisonModeView = () => {
                   size="sm"
                   onClick={() => actions.setMode('single')}
                 >
-                  🔄 Switch to Single Mode
+                  🔍 Switch to Single Mode
                 </Button>
               </div>
             </Card.Body>
@@ -422,10 +439,14 @@ const ComparisonModeView = () => {
           <Card>
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <h5 className="mb-0">🔄 Algorithm Comparison</h5>
+                <h5 className="mb-0">⚖️ Algorithm Comparison</h5>
                 <div>
-                  <Badge bg="success" className="me-2">Heterogeneous</Badge>
-                  <Badge bg="warning">SCAR</Badge>
+                  <Badge bg={getAlgorithmBadge(algorithm1Id)} className="me-2">
+                    {algorithm1Config?.name}
+                  </Badge>
+                  <Badge bg={getAlgorithmBadge(algorithm2Id)}>
+                    {algorithm2Config?.name}
+                  </Badge>
                 </div>
               </div>
             </Card.Header>
@@ -434,20 +455,20 @@ const ComparisonModeView = () => {
                 <Row>
                   <Col md={3}>
                     <strong>Similarity:</strong>
-                    <Badge bg={comparisonMetrics.similarity === 'High' ? 'success' : 
-                              comparisonMetrics.similarity === 'Moderate' ? 'warning' : 'danger'} 
+                    <Badge bg={comparisonMetrics.similarityLevel === 'High' ? 'success' : 
+                              comparisonMetrics.similarityLevel === 'Moderate' ? 'warning' : 'danger'} 
                            className="ms-2">
-                      {comparisonMetrics.similarity}
+                      {comparisonMetrics.similarityLevel}
                     </Badge>
                   </Col>
                   <Col md={3}>
                     <strong>NMI Score:</strong> {comparisonMetrics.nmi?.toFixed(3) || 'N/A'}
                   </Col>
                   <Col md={3}>
-                    <strong>Hetero Clusters:</strong> {comparisonMetrics.clusterCounts?.heterogeneous || 0}
+                    <strong>{algorithm1Config?.name} Clusters:</strong> {comparisonMetrics.clusterCounts?.[algorithm1Id] || 0}
                   </Col>
                   <Col md={3}>
-                    <strong>SCAR Clusters:</strong> {comparisonMetrics.clusterCounts?.scar || 0}
+                    <strong>{algorithm2Config?.name} Clusters:</strong> {comparisonMetrics.clusterCounts?.[algorithm2Id] || 0}
                   </Col>
                 </Row>
               )}
@@ -458,27 +479,27 @@ const ComparisonModeView = () => {
 
       {/* Split-Screen Visualization */}
       <Row>
-        {/* Heterogeneous Algorithm */}
+        {/* First Algorithm */}
         <Col md={6}>
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <span>🟢 Heterogeneous Algorithm</span>
-                <Badge bg="success">
-                  {(comparisonState.heterogeneous.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
+                <span>🔵 {algorithm1Config?.name}</span>
+                <Badge bg={getAlgorithmBadge(algorithm1Id)}>
+                  {(comparisonState[algorithm1Id]?.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
                 </Badge>
               </div>
             </Card.Header>
             
-            {/* Heterogeneous Breadcrumb */}
+            {/* Breadcrumb */}
             <Card.Body className="py-2 border-bottom">
               <Breadcrumb className="mb-0" style={{ fontSize: '0.875rem' }}>
-                {(comparisonState.heterogeneous.breadcrumbPath || []).map((item, index) => (
+                {(comparisonState[algorithm1Id]?.breadcrumbPath || []).map((item, index) => (
                   <Breadcrumb.Item 
                     key={index}
-                    active={index === comparisonState.heterogeneous.breadcrumbPath.length - 1}
-                    onClick={() => navigateViaBreadcrumb('heterogeneous', index)}
-                    style={{ cursor: index === comparisonState.heterogeneous.breadcrumbPath.length - 1 ? 'default' : 'pointer' }}
+                    active={index === comparisonState[algorithm1Id]?.breadcrumbPath.length - 1}
+                    onClick={() => navigateViaBreadcrumb(algorithm1Id, index)}
+                    style={{ cursor: index === comparisonState[algorithm1Id]?.breadcrumbPath.length - 1 ? 'default' : 'pointer' }}
                   >
                     {item.label}
                   </Breadcrumb.Item>
@@ -486,72 +507,66 @@ const ComparisonModeView = () => {
               </Breadcrumb>
             </Card.Body>
 
-            {/* Heterogeneous Parameters */}
+            {/* Parameters */}
             <Card.Body className="py-2 border-bottom">
-              <Form.Group as={Row} className="mb-0">
-                <Form.Label column sm={3}>k:</Form.Label>
-                <Col sm={6}>
-                  <Form.Control 
-                    type="number" 
-                    size="sm"
-                    value={heteroParams.k}
-                    min={1}
-                    onChange={(e) => setHeteroParams({...heteroParams, k: parseInt(e.target.value) || 1})}
-                  />
+              <Row>
+                <Col md={10}>
+                  {renderParameterInputs(algorithm1Id, algorithm1Config)}
                 </Col>
-                <Col sm={3}>
+                <Col md={2}>
                   <Button 
-                    variant="outline-success"
+                    variant={`outline-${getAlgorithmBadge(algorithm1Id)}`}
                     size="sm"
-                    onClick={applyHeteroParams}
-                    disabled={heteroParams.k === comparisonData?.heterogeneous?.parameters?.k}
+                    className="w-100"
+                    onClick={() => applyParameterChanges(algorithm1Id)}
+                    disabled={!hasParametersChanged(algorithm1Id)}
                   >
                     Apply
                   </Button>
                 </Col>
-              </Form.Group>
+              </Row>
             </Card.Body>
 
-            {/* Heterogeneous Visualization */}
+            {/* Visualization */}
             <Card.Body className="p-0">
               <div style={{ height: '400px', border: '1px solid #ddd' }}>
                 <CytoscapeContainer
-                  elements={comparisonState.heterogeneous.cytoscapeElements || []}
-                  onNodeClick={handleNodeClick('heterogeneous')}
-                  algorithm="heterogeneous"
+                  elements={comparisonState[algorithm1Id]?.cytoscapeElements || []}
+                  onNodeClick={handleNodeClick(algorithm1Id)}
+                  algorithm={algorithm1Id}
                 />
               </div>
               
-              {/* Heterogeneous Node Info */}
-              {comparisonState.heterogeneous.selectedNode && (
+              {/* Node Info */}
+              {comparisonState[algorithm1Id]?.selectedNode && (
                 <div className="p-2 border-top">
                   <small>
-                    <strong>Selected:</strong> {comparisonState.heterogeneous.selectedNode.label || comparisonState.heterogeneous.selectedNode.id} 
-                    <Badge bg="outline-success" className="ms-2">
-                      {comparisonState.heterogeneous.selectedNode.type}
+                    <strong>Selected:</strong> {comparisonState[algorithm1Id].selectedNode.label || comparisonState[algorithm1Id].selectedNode.id} 
+                    <Badge bg={`outline-${getAlgorithmBadge(algorithm1Id)}`} className="ms-2">
+                      {comparisonState[algorithm1Id].selectedNode.type}
                     </Badge>
                   </small>
-                  {comparisonState.heterogeneous.selectedNode.type === 'supernode' && (
+                  {comparisonState[algorithm1Id].selectedNode.type === 'supernode' && (
                     <Button 
                       size="sm" 
-                      variant="outline-success" 
+                      variant={`outline-${getAlgorithmBadge(algorithm1Id)}`}
                       className="ms-2"
-                      onClick={() => navigateToSupernode('heterogeneous', comparisonState.heterogeneous.selectedNode.id)}
+                      onClick={() => navigateToSupernode(algorithm1Id, comparisonState[algorithm1Id].selectedNode.id)}
                     >
                       Explore 🔍
                     </Button>
                   )}
                   
                   {/* Node Statistics */}
-                  {algorithmData.heterogeneous.nodeStatistics && (
+                  {algorithmData[algorithm1Id]?.nodeStatistics && (
                     <div className="mt-2">
                       <small className="text-muted">
-                        Degree: {algorithmData.heterogeneous.nodeStatistics.degree || 'N/A'}
-                        {algorithmData.heterogeneous.nodeStatistics.childrenCount && 
-                          ` | Children: ${algorithmData.heterogeneous.nodeStatistics.childrenCount}`
+                        Degree: {algorithmData[algorithm1Id].nodeStatistics.degree || 'N/A'}
+                        {algorithmData[algorithm1Id].nodeStatistics.childrenCount && 
+                          ` | Children: ${algorithmData[algorithm1Id].nodeStatistics.childrenCount}`
                         }
-                        {algorithmData.heterogeneous.nodeStatistics.leafNodeCount && 
-                          ` | Leaves: ${algorithmData.heterogeneous.nodeStatistics.leafNodeCount}`
+                        {algorithmData[algorithm1Id].nodeStatistics.leafNodeCount && 
+                          ` | Leaves: ${algorithmData[algorithm1Id].nodeStatistics.leafNodeCount}`
                         }
                       </small>
                     </div>
@@ -562,27 +577,27 @@ const ComparisonModeView = () => {
           </Card>
         </Col>
 
-        {/* SCAR Algorithm */}
+        {/* Second Algorithm */}
         <Col md={6}>
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <span>🟡 SCAR Algorithm</span>
-                <Badge bg="warning">
-                  {(comparisonState.scar.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
+                <span>🔴 {algorithm2Config?.name}</span>
+                <Badge bg={getAlgorithmBadge(algorithm2Id)}>
+                  {(comparisonState[algorithm2Id]?.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
                 </Badge>
               </div>
             </Card.Header>
             
-            {/* SCAR Breadcrumb */}
+            {/* Breadcrumb */}
             <Card.Body className="py-2 border-bottom">
               <Breadcrumb className="mb-0" style={{ fontSize: '0.875rem' }}>
-                {(comparisonState.scar.breadcrumbPath || []).map((item, index) => (
+                {(comparisonState[algorithm2Id]?.breadcrumbPath || []).map((item, index) => (
                   <Breadcrumb.Item 
                     key={index}
-                    active={index === comparisonState.scar.breadcrumbPath.length - 1}
-                    onClick={() => navigateViaBreadcrumb('scar', index)}
-                    style={{ cursor: index === comparisonState.scar.breadcrumbPath.length - 1 ? 'default' : 'pointer' }}
+                    active={index === comparisonState[algorithm2Id]?.breadcrumbPath.length - 1}
+                    onClick={() => navigateViaBreadcrumb(algorithm2Id, index)}
+                    style={{ cursor: index === comparisonState[algorithm2Id]?.breadcrumbPath.length - 1 ? 'default' : 'pointer' }}
                   >
                     {item.label}
                   </Breadcrumb.Item>
@@ -590,59 +605,19 @@ const ComparisonModeView = () => {
               </Breadcrumb>
             </Card.Body>
 
-            {/* SCAR Parameters */}
+            {/* Parameters */}
             <Card.Body className="py-2 border-bottom">
               <Row>
-                <Col md={4}>
-                  <Form.Group className="mb-1">
-                    <Form.Label className="small">k:</Form.Label>
-                    <Form.Control 
-                      type="number" 
-                      size="sm"
-                      value={scarParams.k}
-                      min={1}
-                      onChange={(e) => setScarParams({...scarParams, k: parseInt(e.target.value) || 1})}
-                    />
-                  </Form.Group>
-                </Col>
-                <Col md={3}>
-                  <Form.Group className="mb-1">
-                    <Form.Label className="small">nk:</Form.Label>
-                    <Form.Control 
-                      type="number" 
-                      size="sm"
-                      value={scarParams.nk}
-                      min={1}
-                      onChange={(e) => setScarParams({...scarParams, nk: parseInt(e.target.value) || 1})}
-                    />
-                  </Form.Group>
-                </Col>
-                <Col md={3}>
-                  <Form.Group className="mb-1">
-                    <Form.Label className="small">th:</Form.Label>
-                    <Form.Control 
-                      type="number" 
-                      size="sm"
-                      value={scarParams.th}
-                      min={0}
-                      max={1}
-                      step={0.1}
-                      onChange={(e) => setScarParams({...scarParams, th: parseFloat(e.target.value) || 0})}
-                    />
-                  </Form.Group>
+                <Col md={10}>
+                  {renderParameterInputs(algorithm2Id, algorithm2Config)}
                 </Col>
                 <Col md={2}>
-                  <Form.Label className="small">&nbsp;</Form.Label>
                   <Button 
-                    variant="outline-warning"
+                    variant={`outline-${getAlgorithmBadge(algorithm2Id)}`}
                     size="sm"
                     className="w-100"
-                    onClick={applyScarParams}
-                    disabled={
-                      scarParams.k === comparisonData?.scar?.parameters?.k &&
-                      scarParams.nk === comparisonData?.scar?.parameters?.nk &&
-                      scarParams.th === comparisonData?.scar?.parameters?.th
-                    }
+                    onClick={() => applyParameterChanges(algorithm2Id)}
+                    disabled={!hasParametersChanged(algorithm2Id)}
                   >
                     Apply
                   </Button>
@@ -650,46 +625,46 @@ const ComparisonModeView = () => {
               </Row>
             </Card.Body>
 
-            {/* SCAR Visualization */}
+            {/* Visualization */}
             <Card.Body className="p-0">
               <div style={{ height: '400px', border: '1px solid #ddd' }}>
                 <CytoscapeContainer
-                  elements={comparisonState.scar.cytoscapeElements || []}
-                  onNodeClick={handleNodeClick('scar')}
-                  algorithm="scar"
+                  elements={comparisonState[algorithm2Id]?.cytoscapeElements || []}
+                  onNodeClick={handleNodeClick(algorithm2Id)}
+                  algorithm={algorithm2Id}
                 />
               </div>
               
-              {/* SCAR Node Info */}
-              {comparisonState.scar.selectedNode && (
+              {/* Node Info */}
+              {comparisonState[algorithm2Id]?.selectedNode && (
                 <div className="p-2 border-top">
                   <small>
-                    <strong>Selected:</strong> {comparisonState.scar.selectedNode.label || comparisonState.scar.selectedNode.id} 
-                    <Badge bg="outline-warning" className="ms-2">
-                      {comparisonState.scar.selectedNode.type}
+                    <strong>Selected:</strong> {comparisonState[algorithm2Id].selectedNode.label || comparisonState[algorithm2Id].selectedNode.id} 
+                    <Badge bg={`outline-${getAlgorithmBadge(algorithm2Id)}`} className="ms-2">
+                      {comparisonState[algorithm2Id].selectedNode.type}
                     </Badge>
                   </small>
-                  {comparisonState.scar.selectedNode.type === 'supernode' && (
+                  {comparisonState[algorithm2Id].selectedNode.type === 'supernode' && (
                     <Button 
                       size="sm" 
-                      variant="outline-warning" 
+                      variant={`outline-${getAlgorithmBadge(algorithm2Id)}`}
                       className="ms-2"
-                      onClick={() => navigateToSupernode('scar', comparisonState.scar.selectedNode.id)}
+                      onClick={() => navigateToSupernode(algorithm2Id, comparisonState[algorithm2Id].selectedNode.id)}
                     >
                       Explore 🔍
                     </Button>
                   )}
                   
                   {/* Node Statistics */}
-                  {algorithmData.scar.nodeStatistics && (
+                  {algorithmData[algorithm2Id]?.nodeStatistics && (
                     <div className="mt-2">
                       <small className="text-muted">
-                        Degree: {algorithmData.scar.nodeStatistics.degree || 'N/A'}
-                        {algorithmData.scar.nodeStatistics.childrenCount && 
-                          ` | Children: ${algorithmData.scar.nodeStatistics.childrenCount}`
+                        Degree: {algorithmData[algorithm2Id].nodeStatistics.degree || 'N/A'}
+                        {algorithmData[algorithm2Id].nodeStatistics.childrenCount && 
+                          ` | Children: ${algorithmData[algorithm2Id].nodeStatistics.childrenCount}`
                         }
-                        {algorithmData.scar.nodeStatistics.leafNodeCount && 
-                          ` | Leaves: ${algorithmData.scar.nodeStatistics.leafNodeCount}`
+                        {algorithmData[algorithm2Id].nodeStatistics.leafNodeCount && 
+                          ` | Leaves: ${algorithmData[algorithm2Id].nodeStatistics.leafNodeCount}`
                         }
                       </small>
                     </div>
@@ -714,43 +689,43 @@ const ComparisonModeView = () => {
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      <th>🟢 Heterogeneous</th>
-                      <th>🟡 SCAR</th>
+                      <th>🔵 {algorithm1Config?.name}</th>
+                      <th>🔴 {algorithm2Config?.name}</th>
                       <th>Difference</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
                       <td><strong>Total Clusters</strong></td>
-                      <td>{comparisonMetrics.clusterCounts.heterogeneous}</td>
-                      <td>{comparisonMetrics.clusterCounts.scar}</td>
-                      <td>{Math.abs(comparisonMetrics.clusterCounts.heterogeneous - comparisonMetrics.clusterCounts.scar)}</td>
+                      <td>{comparisonMetrics.clusterCounts[algorithm1Id]}</td>
+                      <td>{comparisonMetrics.clusterCounts[algorithm2Id]}</td>
+                      <td>{Math.abs(comparisonMetrics.clusterCounts[algorithm1Id] - comparisonMetrics.clusterCounts[algorithm2Id])}</td>
                     </tr>
                     <tr>
                       <td><strong>Avg Cluster Size</strong></td>
-                      <td>{comparisonMetrics.clusterSizeStats.heterogeneous.mean?.toFixed(1) || 'N/A'}</td>
-                      <td>{comparisonMetrics.clusterSizeStats.scar.mean?.toFixed(1) || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm1Id]?.mean?.toFixed(1) || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm2Id]?.mean?.toFixed(1) || 'N/A'}</td>
                       <td>{Math.abs(
-                        (comparisonMetrics.clusterSizeStats.heterogeneous.mean || 0) - 
-                        (comparisonMetrics.clusterSizeStats.scar.mean || 0)
+                        (comparisonMetrics.clusterSizeStats[algorithm1Id]?.mean || 0) - 
+                        (comparisonMetrics.clusterSizeStats[algorithm2Id]?.mean || 0)
                       ).toFixed(1)}</td>
                     </tr>
                     <tr>
                       <td><strong>Max Cluster Size</strong></td>
-                      <td>{comparisonMetrics.clusterSizeStats.heterogeneous.max || 'N/A'}</td>
-                      <td>{comparisonMetrics.clusterSizeStats.scar.max || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm1Id]?.max || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm2Id]?.max || 'N/A'}</td>
                       <td>{Math.abs(
-                        (comparisonMetrics.clusterSizeStats.heterogeneous.max || 0) - 
-                        (comparisonMetrics.clusterSizeStats.scar.max || 0)
+                        (comparisonMetrics.clusterSizeStats[algorithm1Id]?.max || 0) - 
+                        (comparisonMetrics.clusterSizeStats[algorithm2Id]?.max || 0)
                       )}</td>
                     </tr>
                     <tr>
                       <td><strong>Min Cluster Size</strong></td>
-                      <td>{comparisonMetrics.clusterSizeStats.heterogeneous.min || 'N/A'}</td>
-                      <td>{comparisonMetrics.clusterSizeStats.scar.min || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm1Id]?.min || 'N/A'}</td>
+                      <td>{comparisonMetrics.clusterSizeStats[algorithm2Id]?.min || 'N/A'}</td>
                       <td>{Math.abs(
-                        (comparisonMetrics.clusterSizeStats.heterogeneous.min || 0) - 
-                        (comparisonMetrics.clusterSizeStats.scar.min || 0)
+                        (comparisonMetrics.clusterSizeStats[algorithm1Id]?.min || 0) - 
+                        (comparisonMetrics.clusterSizeStats[algorithm2Id]?.min || 0)
                       )}</td>
                     </tr>
                   </tbody>
