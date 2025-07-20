@@ -1,3 +1,5 @@
+// Fixed ComparisonModeView.js with explore button and graph overflow fixes
+
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Card, Spinner, Alert, Badge, Button, Table, Form, Breadcrumb } from 'react-bootstrap';
 import { useAppState, useLoadingState, useComparisonState } from '../core/AppStateManager';
@@ -11,8 +13,22 @@ const ComparisonModeView = () => {
   const { comparisonData, comparisonMetrics, comparisonState, comparisonFiles } = useComparisonState();
 
   // Extract algorithm IDs dynamically from comparison data
-  const algorithm1Id = comparisonData ? Object.keys(comparisonData)[0] : null;
-  const algorithm2Id = comparisonData ? Object.keys(comparisonData)[1] : null;
+  const algorithm1Id = comparisonData ? Object.keys(comparisonData).filter(key => 
+    key !== 'metrics' && 
+    key !== 'timestamp' && 
+    comparisonData[key] && 
+    typeof comparisonData[key] === 'object' &&
+    comparisonData[key].datasetId  // FIXED: Check for datasetId instead of parameters
+  )[0] : null;
+  
+  const algorithm2Id = comparisonData ? Object.keys(comparisonData).filter(key => 
+    key !== 'metrics' && 
+    key !== 'timestamp' && 
+    comparisonData[key] && 
+    typeof comparisonData[key] === 'object' &&
+    comparisonData[key].datasetId  // FIXED: Check for datasetId instead of parameters
+  )[1] : null;
+
   
   // Get algorithm configurations
   const algorithm1Config = algorithm1Id ? AlgorithmRegistry.getAlgorithm(algorithm1Id) : null;
@@ -23,6 +39,25 @@ const ComparisonModeView = () => {
 
   // Individual algorithm data state
   const [algorithmData, setAlgorithmData] = useState({});
+
+  // Debug state
+  const [debugInfo, setDebugInfo] = useState('');
+
+  useEffect(() => {
+  if (comparisonData && algorithm1Id && algorithm2Id) {
+    // 🔍 ADD THIS PRINT
+    console.log('🔍 COMPARISON DATA RECEIVED:', {
+      algorithm1Id,
+      algorithm2Id,
+      algorithm1Root: comparisonData[algorithm1Id]?.rootNode,
+      algorithm2Root: comparisonData[algorithm2Id]?.rootNode,
+      fullData: comparisonData
+    });
+    
+    console.log(`🔄 Initializing comparison view: ${algorithm1Id} vs ${algorithm2Id}`);
+    initializeComparisonView();
+  }
+}, [comparisonData, algorithm1Id, algorithm2Id]);
 
   // Initialize parameters when comparison data changes
   useEffect(() => {
@@ -46,48 +81,58 @@ const ComparisonModeView = () => {
         nodeStatistics: null
       };
       setAlgorithmData(newAlgorithmData);
+
+      // Debug info
+      setDebugInfo(`Initialized with algorithms: ${algorithm1Id}, ${algorithm2Id}`);
     }
   }, [comparisonData, algorithm1Id, algorithm2Id]);
 
   // Initialize comparison view when comparisonData is available
   useEffect(() => {
     if (comparisonData && algorithm1Id && algorithm2Id) {
-      console.log(`⚖️ Initializing comparison view: ${algorithm1Id} vs ${algorithm2Id}`);
+      console.log(`🔄 Initializing comparison view: ${algorithm1Id} vs ${algorithm2Id}`);
       initializeComparisonView();
     }
   }, [comparisonData]);
 
   // Initialize the comparison view with root data for both algorithms
   const initializeComparisonView = async () => {
+    if (!comparisonData || !algorithm1Id || !algorithm2Id) {
+      console.error('Missing comparison data or algorithm IDs');
+      return;
+    }
+
     actions.setLoading(true);
     actions.setProcessingStep('Loading comparison data...');
 
     try {
-      // Load hierarchy data for both algorithms
-      await Promise.all([
-        loadAlgorithmHierarchy(algorithm1Id),
-        loadAlgorithmHierarchy(algorithm2Id)
-      ]);
+      // FIXED: Extract the correct data structure from backend response
+      const algorithm1Data = comparisonData[algorithm1Id];
+      const algorithm2Data = comparisonData[algorithm2Id];
+
+      console.log('Algorithm 1 Data:', algorithm1Data);
+      console.log('Algorithm 2 Data:', algorithm2Data);
 
       // Load data for first algorithm
       await loadSupernodeData(
         algorithm1Id,
-        comparisonData[algorithm1Id].datasetId,
-        comparisonData[algorithm1Id].parameters,
-        comparisonData[algorithm1Id].rootNode
+        algorithm1Data.datasetId,
+        algorithm1Data.parameters || AlgorithmRegistry.getDefaultParameters(algorithm1Id),
+        algorithm1Data.rootNode
       );
 
       // Load data for second algorithm
       await loadSupernodeData(
         algorithm2Id,
-        comparisonData[algorithm2Id].datasetId,
-        comparisonData[algorithm2Id].parameters,
-        comparisonData[algorithm2Id].rootNode
+        algorithm2Data.datasetId,
+        algorithm2Data.parameters || AlgorithmRegistry.getDefaultParameters(algorithm2Id),
+        algorithm2Data.rootNode
       );
 
       console.log('✅ Comparison view initialized successfully');
     } catch (err) {
       actions.setError(`Error initializing comparison view: ${err.message}`);
+      console.error('Error initializing comparison view:', err);
     } finally {
       actions.setLoading(false);
     }
@@ -121,37 +166,111 @@ const ComparisonModeView = () => {
   };
 
   // Load data for a specific algorithm and supernode
-  const loadSupernodeData = async (algorithmId, datasetId, parameters, supernodeId) => {
-    if (!datasetId || !supernodeId) {
-      console.warn(`Missing data for ${algorithmId}: datasetId=${datasetId}, supernodeId=${supernodeId}`);
-      return;
+const loadSupernodeData = async (algorithmId, datasetId, parameters, supernodeId) => {
+  console.log('🔍 LOAD_SUPERNODE_DATA CALLED:', {
+    algorithmId,
+    datasetId,
+    parameters,
+    supernodeId,
+    timestamp: new Date().toISOString()
+  });
+  
+  if (!datasetId || !supernodeId) {
+    console.warn(`❌ Missing data for ${algorithmId}: datasetId=${datasetId}, supernodeId=${supernodeId}`);
+    return;
+  }
+
+  // 🔍 ENHANCED LOGGING
+  const callId = `${algorithmId}-${Date.now()}`;
+  console.log(`🔄 [${callId}] Starting loadSupernodeData:`, {
+    algorithmId,
+    datasetId,
+    parameters,
+    supernodeId,
+    timestamp: new Date().toISOString()
+  });
+
+  actions.setProcessingStep(`Loading ${algorithmId} supernode ${supernodeId}...`);
+
+  try {
+    // 🔍 LOG THE EXACT API CALL
+    console.log(`🌐 [${callId}] Making API call to DataService.getSupernodeData`);
+    
+    const response = await DataService.getSupernodeData(algorithmId, datasetId, supernodeId, parameters);
+
+    console.log(`📥 [${callId}] API Response received:`, {
+      success: response?.success,
+      nodeCount: response?.nodes?.length,
+      hasEdges: response?.edges?.length > 0,
+      response: response
+    });
+
+    if (!response || !response.success) {
+      throw new Error(response?.message || `Failed to get ${algorithmId} supernode data`);
     }
 
-    actions.setProcessingStep(`Loading ${algorithmId} supernode ${supernodeId}...`);
+    if (!response.nodes || !Array.isArray(response.nodes)) {
+      console.warn(`⚠️ [${callId}] No nodes in response, using empty array`);
+      response.nodes = [];
+    }
 
-    try {
-      const response = await DataService.getSupernodeData(algorithmId, datasetId, supernodeId, parameters);
+    // Transform nodes to Cytoscape elements
+    const cytoscapeElements = response.nodes.map(node => ({
+      data: {
+        id: String(node.id),
+        label: String(node.label || node.id),
+        size: node.radius || 20,
+        type: node.type || 'supernode',
+        metadata: node.metadata || {}
+      },
+      position: {
+        x: node.x || 0,
+        y: node.y || 0
+      },
+      classes: node.type || 'supernode'
+    }));
 
-      if (!response.success) {
-        throw new Error(response.message || `Failed to get ${algorithmId} supernode data`);
-      }
-
-      if (!response.nodes || !Array.isArray(response.nodes) || response.nodes.length === 0) {
-        throw new Error(`No nodes received for ${algorithmId} algorithm`);
-      }
-
-      // Update comparison state for this algorithm
-      actions.updateComparisonState(algorithmId, {
-        cytoscapeElements: response.nodes,
-        currentSupernode: supernodeId,
-        breadcrumbPath: updateBreadcrumbPath(algorithmId, supernodeId)
+    // Add edges if they exist
+    if (response.edges && Array.isArray(response.edges)) {
+      response.edges.forEach(edge => {
+        cytoscapeElements.push({
+          data: {
+            id: `${edge.source}-${edge.target}`,
+            source: String(edge.source),
+            target: String(edge.target),
+            weight: edge.weight || 1
+          }
+        });
       });
-
-    } catch (err) {
-      actions.setError(`Error loading ${algorithmId} supernode data: ${err.message}`);
-      console.error(`Error loading ${algorithmId} supernode data:`, err);
     }
-  };
+
+    // Update comparison state
+    console.log(`🔄 [${callId}] Updating comparison state with ${cytoscapeElements.length} elements`);
+    
+    actions.updateComparisonState(algorithmId, {
+      cytoscapeElements: cytoscapeElements,
+      currentSupernode: supernodeId,
+      breadcrumbPath: updateBreadcrumbPath(algorithmId, supernodeId)
+    });
+
+    console.log(`✅ [${callId}] Successfully loaded ${cytoscapeElements.length} elements for ${algorithmId}`);
+
+  } catch (err) {
+    // 🔍 ENHANCED ERROR LOGGING
+    console.error(`❌ [${callId}] Error in loadSupernodeData:`, {
+      algorithmId,
+      datasetId,
+      supernodeId,
+      error: err.message,
+      stack: err.stack,
+      timestamp: new Date().toISOString()
+    });
+    
+    actions.setError(`Error loading ${algorithmId} supernode data: ${err.message}`);
+  }
+};
+
+
 
   // Update breadcrumb path for an algorithm
   const updateBreadcrumbPath = (algorithmId, supernodeId) => {
@@ -235,22 +354,38 @@ const ComparisonModeView = () => {
     }
   };
 
-  // Navigate to supernode for specific algorithm
+  // FIXED: Navigate to supernode for specific algorithm
   const navigateToSupernode = async (algorithmId, supernodeId) => {
-    if (!supernodeId || !comparisonData) return;
+    console.log(`🔍 Navigate to supernode called: ${algorithmId}, ${supernodeId}`);
+    
+    if (!supernodeId || !comparisonData) {
+      console.error('Missing supernodeId or comparisonData');
+      setDebugInfo(`Error: Missing supernodeId (${supernodeId}) or comparisonData`);
+      return;
+    }
 
     const algorithmDataConfig = comparisonData[algorithmId];
-    if (!algorithmDataConfig) return;
+    if (!algorithmDataConfig) {
+      console.error(`No algorithm config found for ${algorithmId}`);
+      setDebugInfo(`Error: No algorithm config found for ${algorithmId}`);
+      return;
+    }
 
     try {
+      setDebugInfo(`Navigating ${algorithmId} to supernode ${supernodeId}...`);
+      
       await loadSupernodeData(
         algorithmId,
         algorithmDataConfig.datasetId,
         algorithmDataConfig.parameters,
         supernodeId
       );
+      
+      setDebugInfo(`Successfully navigated ${algorithmId} to supernode ${supernodeId}`);
     } catch (err) {
-      actions.setError(`Error navigating ${algorithmId} to supernode: ${err.message}`);
+      const errorMsg = `Error navigating ${algorithmId} to supernode: ${err.message}`;
+      actions.setError(errorMsg);
+      setDebugInfo(errorMsg);
     }
   };
 
@@ -286,7 +421,11 @@ const ComparisonModeView = () => {
       }
 
       // Reprocess with new parameters
-      const processResult = await DataService.processDataset(algorithmId, comparisonFiles, newParameters);
+      const processResult = await DataService.reprocessWithNewParameters(
+        algorithmId, 
+        comparisonData[algorithmId].datasetId,  // Use existing dataset ID
+        newParameters
+      );
       
       if (!processResult.success) {
         throw new Error(processResult.message || 'Failed to process with new parameters');
@@ -334,6 +473,18 @@ const ComparisonModeView = () => {
       case 'scar': return 'warning';
       default: return 'primary';
     }
+  };
+
+  // FIXED: Check if node is a supernode and button should be enabled
+  const canNavigateToSupernode = (algorithmId) => {
+    const selectedNode = comparisonState[algorithmId]?.selectedNode;
+    const algorithmConfig = comparisonData?.[algorithmId];
+    
+    return selectedNode && 
+           selectedNode.type === 'supernode' && 
+           selectedNode.id && 
+           algorithmConfig &&
+           algorithmConfig.datasetId;
   };
 
   // Render parameter inputs for an algorithm
@@ -420,13 +571,21 @@ const ComparisonModeView = () => {
                     Comparing {algorithm1Config?.name} vs {algorithm2Config?.name}
                   </small>
                 </div>
-                <Button 
-                  variant="outline-secondary" 
-                  size="sm"
-                  onClick={() => actions.setMode('single')}
-                >
-                  🔍 Switch to Single Mode
-                </Button>
+                <div>
+                  <Button 
+                    variant="outline-secondary" 
+                    size="sm"
+                    onClick={() => actions.setMode('single')}
+                    className="me-2"
+                  >
+                    🔍 Switch to Single Mode
+                  </Button>
+                  {debugInfo && (
+                    <small className="text-muted">
+                      Debug: {debugInfo}
+                    </small>
+                  )}
+                </div>
               </div>
             </Card.Body>
           </Card>
@@ -439,7 +598,7 @@ const ComparisonModeView = () => {
           <Card>
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <h5 className="mb-0">⚖️ Algorithm Comparison</h5>
+                <h5 className="mb-0">🔄 Algorithm Comparison</h5>
                 <div>
                   <Badge bg={getAlgorithmBadge(algorithm1Id)} className="me-2">
                     {algorithm1Config?.name}
@@ -484,7 +643,7 @@ const ComparisonModeView = () => {
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <span>🔵 {algorithm1Config?.name}</span>
+                <span>🔽 {algorithm1Config?.name}</span>
                 <Badge bg={getAlgorithmBadge(algorithm1Id)}>
                   {(comparisonState[algorithm1Id]?.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
                 </Badge>
@@ -527,17 +686,23 @@ const ComparisonModeView = () => {
               </Row>
             </Card.Body>
 
-            {/* Visualization */}
-            <Card.Body className="p-0">
-              <div style={{ height: '400px', border: '1px solid #ddd' }}>
+            {/* FIXED: Visualization with proper container */}
+            <Card.Body className="p-0" style={{ position: 'relative' }}>
+              <div style={{ 
+                height: '400px', 
+                border: '1px solid #ddd',
+                overflow: 'hidden', // FIXED: Prevent overflow
+                position: 'relative'
+              }}>
                 <CytoscapeContainer
                   elements={comparisonState[algorithm1Id]?.cytoscapeElements || []}
                   onNodeClick={handleNodeClick(algorithm1Id)}
                   algorithm={algorithm1Id}
+                  style={{ width: '100%', height: '100%' }} // FIXED: Ensure full container usage
                 />
               </div>
               
-              {/* Node Info */}
+              {/* FIXED: Node Info with proper explore button - LEFT SIDE */}
               {comparisonState[algorithm1Id]?.selectedNode && (
                 <div className="p-2 border-top">
                   <small>
@@ -546,15 +711,37 @@ const ComparisonModeView = () => {
                       {comparisonState[algorithm1Id].selectedNode.type}
                     </Badge>
                   </small>
+                  
                   {comparisonState[algorithm1Id].selectedNode.type === 'supernode' && (
-                    <Button 
-                      size="sm" 
-                      variant={`outline-${getAlgorithmBadge(algorithm1Id)}`}
-                      className="ms-2"
-                      onClick={() => navigateToSupernode(algorithm1Id, comparisonState[algorithm1Id].selectedNode.id)}
-                    >
-                      Explore 🔍
-                    </Button>
+                    <div className="mt-2">
+                      <Button 
+                        size="sm" 
+                        variant={`outline-${getAlgorithmBadge(algorithm1Id)}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('LEFT Explore button clicked for:', algorithm1Id, comparisonState[algorithm1Id].selectedNode.id);
+                          navigateToSupernode(algorithm1Id, comparisonState[algorithm1Id].selectedNode.id);
+                        }}
+                        disabled={!canNavigateToSupernode(algorithm1Id) || loading}
+                        title={canNavigateToSupernode(algorithm1Id) ? `Explore supernode ${comparisonState[algorithm1Id].selectedNode.id}` : 'Cannot navigate - missing data'}
+                      >
+                        {loading ? 'Loading...' : 'Explore 🔍'}
+                      </Button>
+                      {!canNavigateToSupernode(algorithm1Id) && (
+                        <small className="text-muted d-block mt-1">
+                          Debug: Missing required data for navigation (LEFT - {algorithm1Id})
+                        </small>
+                      )}
+                    </div>
+                  )}
+                  
+                  {comparisonState[algorithm1Id].selectedNode.type !== 'supernode' && (
+                    <div className="mt-2">
+                      <small className="text-muted">
+                        Leaf node - no navigation available
+                      </small>
+                    </div>
                   )}
                   
                   {/* Node Statistics */}
@@ -573,6 +760,17 @@ const ComparisonModeView = () => {
                   )}
                 </div>
               )}
+              
+              {/* DEBUG: Show algorithm1Id and state info */}
+              {debugInfo && (
+                <div className="debug-info p-2 border-top bg-light">
+                  <small>
+                    <strong>Debug Left:</strong> Algorithm: {algorithm1Id || 'undefined'} | 
+                    Selected: {comparisonState[algorithm1Id]?.selectedNode?.id || 'none'} | 
+                    Elements: {(comparisonState[algorithm1Id]?.cytoscapeElements || []).length}
+                  </small>
+                </div>
+              )}
             </Card.Body>
           </Card>
         </Col>
@@ -582,7 +780,7 @@ const ComparisonModeView = () => {
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center">
-                <span>🔴 {algorithm2Config?.name}</span>
+                <span>🔽 {algorithm2Config?.name}</span>
                 <Badge bg={getAlgorithmBadge(algorithm2Id)}>
                   {(comparisonState[algorithm2Id]?.cytoscapeElements || []).filter(el => !el.data?.source).length} nodes
                 </Badge>
@@ -625,17 +823,23 @@ const ComparisonModeView = () => {
               </Row>
             </Card.Body>
 
-            {/* Visualization */}
-            <Card.Body className="p-0">
-              <div style={{ height: '400px', border: '1px solid #ddd' }}>
+            {/* FIXED: Visualization with proper container */}
+            <Card.Body className="p-0" style={{ position: 'relative' }}>
+              <div style={{ 
+                height: '400px', 
+                border: '1px solid #ddd',
+                overflow: 'hidden', // FIXED: Prevent overflow
+                position: 'relative'
+              }}>
                 <CytoscapeContainer
                   elements={comparisonState[algorithm2Id]?.cytoscapeElements || []}
                   onNodeClick={handleNodeClick(algorithm2Id)}
                   algorithm={algorithm2Id}
+                  style={{ width: '100%', height: '100%' }} // FIXED: Ensure full container usage
                 />
               </div>
               
-              {/* Node Info */}
+              {/* FIXED: Node Info with proper explore button - RIGHT SIDE */}
               {comparisonState[algorithm2Id]?.selectedNode && (
                 <div className="p-2 border-top">
                   <small>
@@ -644,15 +848,37 @@ const ComparisonModeView = () => {
                       {comparisonState[algorithm2Id].selectedNode.type}
                     </Badge>
                   </small>
+                  
                   {comparisonState[algorithm2Id].selectedNode.type === 'supernode' && (
-                    <Button 
-                      size="sm" 
-                      variant={`outline-${getAlgorithmBadge(algorithm2Id)}`}
-                      className="ms-2"
-                      onClick={() => navigateToSupernode(algorithm2Id, comparisonState[algorithm2Id].selectedNode.id)}
-                    >
-                      Explore 🔍
-                    </Button>
+                    <div className="mt-2">
+                      <Button 
+                        size="sm" 
+                        variant={`outline-${getAlgorithmBadge(algorithm2Id)}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('RIGHT Explore button clicked for:', algorithm2Id, comparisonState[algorithm2Id].selectedNode.id);
+                          navigateToSupernode(algorithm2Id, comparisonState[algorithm2Id].selectedNode.id);
+                        }}
+                        disabled={!canNavigateToSupernode(algorithm2Id) || loading}
+                        title={canNavigateToSupernode(algorithm2Id) ? `Explore supernode ${comparisonState[algorithm2Id].selectedNode.id}` : 'Cannot navigate - missing data'}
+                      >
+                        {loading ? 'Loading...' : 'Explore 🔍'}
+                      </Button>
+                      {!canNavigateToSupernode(algorithm2Id) && (
+                        <small className="text-muted d-block mt-1">
+                          Debug: Missing required data for navigation (RIGHT - {algorithm2Id})
+                        </small>
+                      )}
+                    </div>
+                  )}
+                  
+                  {comparisonState[algorithm2Id].selectedNode.type !== 'supernode' && (
+                    <div className="mt-2">
+                      <small className="text-muted">
+                        Leaf node - no navigation available
+                      </small>
+                    </div>
                   )}
                   
                   {/* Node Statistics */}
@@ -669,6 +895,17 @@ const ComparisonModeView = () => {
                       </small>
                     </div>
                   )}
+                </div>
+              )}
+              
+              {/* DEBUG: Show algorithm2Id and state info */}
+              {debugInfo && (
+                <div className="debug-info p-2 border-top bg-light">
+                  <small>
+                    <strong>Debug Right:</strong> Algorithm: {algorithm2Id || 'undefined'} | 
+                    Selected: {comparisonState[algorithm2Id]?.selectedNode?.id || 'none'} | 
+                    Elements: {(comparisonState[algorithm2Id]?.cytoscapeElements || []).length}
+                  </small>
                 </div>
               )}
             </Card.Body>
@@ -689,8 +926,8 @@ const ComparisonModeView = () => {
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      <th>🔵 {algorithm1Config?.name}</th>
-                      <th>🔴 {algorithm2Config?.name}</th>
+                      <th>🔽 {algorithm1Config?.name}</th>
+                      <th>🔽 {algorithm2Config?.name}</th>
                       <th>Difference</th>
                     </tr>
                   </thead>

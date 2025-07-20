@@ -237,18 +237,16 @@ class AlgorithmRegistry {
       category: 'advanced',
       
       fileRequirements: {
-        count: 4,
-        types: ['info', 'link', 'node', 'meta'],
-        extensions: ['.dat'],
-        naming: 'datasetName_type.dat',
+        count: 3, 
+        types: ['graph', 'properties', 'path'],
+        extensions: ['.adj', '.txt', '.dat'], 
         descriptions: {
-          info: 'Graph information and metadata',
-          link: 'Edge/link information',
-          node: 'Node information and attributes',
-          meta: 'Meta-path information'
+          graph: 'Graph edges/adjacency information',
+          properties: 'Node properties and attributes',
+          path: 'Meta-path information'
         }
       },
-      
+        
       parameterSchema: [
         {
           id: 'k',
@@ -261,9 +259,8 @@ class AlgorithmRegistry {
           validation: (value) => Number.isInteger(value) && value > 0
         }
       ],
-      
       validateFiles: (files) => {
-        const required = ['infoFile', 'linkFile', 'nodeFile', 'metaFile'];
+        const required = ['graphFile', 'propertiesFile', 'pathFile']; // CHANGED
         const missing = required.filter(type => !files[type]);
         
         if (missing.length > 0) {
@@ -272,32 +269,33 @@ class AlgorithmRegistry {
             error: `Missing required files: ${missing.join(', ')}`
           };
         }
-        
-        // Validate naming convention if files are provided
-        if (files.infoFile) {
-          const infoFileName = files.infoFile.name;
-          const datasetName = infoFileName.replace('_info.dat', '');
-          
-          const expectedNames = {
-            infoFile: `${datasetName}_info.dat`,
-            linkFile: `${datasetName}_link.dat`,
-            nodeFile: `${datasetName}_node.dat`,
-            metaFile: `${datasetName}_meta.dat`
-          };
-          
-          for (const [type, expectedName] of Object.entries(expectedNames)) {
-            if (files[type] && files[type].name !== expectedName) {
+
+        // Validate file extensions - more flexible now
+        const fileExtensions = {
+          graphFile: ['.adj', '.txt', '.dat'],
+          propertiesFile: ['.txt', '.dat'],
+          pathFile: ['.dat', '.txt']
+        };
+
+        for (const [fileType, file] of Object.entries(files)) {
+          if (required.includes(fileType) && file) {
+            const allowedExts = fileExtensions[fileType];
+            const hasValidExt = allowedExts.some(ext => 
+              file.name.toLowerCase().endsWith(ext)
+            );
+            
+            if (!hasValidExt) {
               return {
                 valid: false,
-                error: `File naming mismatch for ${type}. Expected: ${expectedName}, got: ${files[type].name}`
+                error: `${fileType} must be one of: ${allowedExts.join(', ')}`
               };
             }
           }
         }
-        
+
         return { valid: true };
       },
-      
+
       validateParameters: (params) => {
         if (!params.k || params.k < 1) {
           return {
@@ -313,23 +311,21 @@ class AlgorithmRegistry {
 
     // Register SCAR Algorithm
     this.register({
-      id: 'scar',
-      name: 'SCAR Algorithm',
-      description: 'SCAR algorithm with advanced parameters',
-      category: 'advanced',
-      
-      fileRequirements: {
-        count: 4,
-        types: ['info', 'link', 'node', 'meta'],
-        extensions: ['.dat'],
-        naming: 'datasetName_type.dat',
-        descriptions: {
-          info: 'Graph information and metadata',
-          link: 'Edge/link information',
-          node: 'Node information and attributes',
-          meta: 'Meta-path information'
-        }
-      },
+        id: 'scar',
+        name: 'SCAR Algorithm',
+        description: 'SCAR algorithm with advanced parameters',
+        category: 'advanced',
+        
+        fileRequirements: {
+          count: 3, 
+          types: ['graph', 'properties', 'path'],
+          extensions: ['.adj', '.txt', '.dat'],
+          descriptions: {
+            graph: 'Graph edges/adjacency information',
+            properties: 'Node properties and attributes', 
+            path: 'Meta-path information'
+          }
+        },
       
       parameterSchema: [
         {
@@ -367,7 +363,7 @@ class AlgorithmRegistry {
       
       validateFiles: (files) => {
         // Same validation as heterogeneous
-        const required = ['infoFile', 'linkFile', 'nodeFile', 'metaFile'];
+        const required = ['graphFile', 'propertiesFile', 'pathFile'];
         const missing = required.filter(type => !files[type]);
         
         if (missing.length > 0) {

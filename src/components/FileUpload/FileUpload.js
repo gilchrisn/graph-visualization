@@ -169,19 +169,19 @@ const FileUpload = () => {
     }
   };
 
-  // Generate file input fields
+  // Generate file input 
   const renderFileInputs = (fileRequirements) => {
     if (!fileRequirements) return null;
 
     return fileRequirements.types.map(fileType => {
-      const fieldName = `${fileType}File`;
+      const fieldName = `${fileType}File`; 
       
       return (
         <Form.Group key={fileType} className="mb-3">
           <Form.Label>
             {fileType.charAt(0).toUpperCase() + fileType.slice(1)} File
-            {fileRequirements.naming && (
-              <small className="text-muted ms-2">(*_{fileType}.{fileRequirements.extensions[0].replace('.', '')})</small>
+            {fileRequirements.extensions && (
+              <small className="text-muted ms-2">({fileRequirements.extensions.join(', ')})</small>
             )}
           </Form.Label>
           <Form.Control

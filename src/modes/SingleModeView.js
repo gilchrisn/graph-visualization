@@ -23,6 +23,14 @@ const SingleModeView = () => {
 
   // Load supernode data
   const loadSupernodeData = async (supernodeId) => {
+    if (supernodeId === 'c0_l3_0') {
+    console.error('🚨 SingleModeView calling c0_l3_0!', {
+      supernodeId,
+      dataset,
+      algorithm,
+      stack: new Error().stack
+    });
+  }
     if (!dataset || !supernodeId) {
       actions.setError("Missing dataset ID or supernode ID");
       return;

@@ -1,3 +1,5 @@
+// Fixed CytoscapeContainer.js with proper overflow handling
+
 import React, { useRef, useEffect, useCallback } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 import cytoscape from 'cytoscape';
@@ -26,6 +28,7 @@ const CytoscapeContainer = ({
   className = ''
 }) => {
   const cyRef = useRef(null);
+  const containerRef = useRef(null);
   const { cytoscapeElements, layout, selectedNode } = useVisualizationState();
   
   // Use elements prop if provided, otherwise use from state
@@ -171,6 +174,14 @@ const CytoscapeContainer = ({
       null, // onNodeHover - can be added later
       fisheyeEnabled ? handleMouseMove : null
     );
+
+    // FIXED: Ensure the graph fits within the container after initialization
+    setTimeout(() => {
+      if (cy && cy.elements().length > 0) {
+        cy.fit(20); // Add padding to ensure elements are visible
+        cy.center();
+      }
+    }, 100);
   }, [handleNodeClickInternal, fisheyeEnabled, handleMouseMove]);
 
   // Update events when fisheye state changes
@@ -185,21 +196,54 @@ const CytoscapeContainer = ({
     }
   }, [fisheyeEnabled, handleNodeClickInternal, handleMouseMove]);
 
-  // Fit layout when elements change
+  // FIXED: Fit layout when elements change with proper container sizing
   useEffect(() => {
     if (cyRef.current && processedElements.length > 0) {
       setTimeout(() => {
         if (cyRef.current) {
-          cyRef.current.fit(50);
+          cyRef.current.fit(30); // Increased padding for better visibility
+          cyRef.current.center();
+          
+          // Force a resize to ensure proper container bounds
+          cyRef.current.resize();
         }
-      }, 100);
+      }, 200); // Increased timeout to ensure container is fully rendered
     }
   }, [processedElements.length]);
 
+  // FIXED: Handle container resize for comparison mode
+  useEffect(() => {
+    const handleResize = () => {
+      if (cyRef.current) {
+        setTimeout(() => {
+          cyRef.current.resize();
+          if (cyRef.current.elements().length > 0) {
+            cyRef.current.fit(30);
+          }
+        }, 100);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // FIXED: Show fisheye controls only in single mode (not in comparison mode)
+  const showFisheyeControls = !algorithm; // algorithm prop is passed only in comparison mode
+
   return (
-    <div className={`cytoscape-container ${className}`} style={{ position: 'relative' }}>
-      {/* Fisheye Controls */}
-      {!algorithm && ( // Only show fisheye controls in single mode
+    <div 
+      ref={containerRef}
+      className={`cytoscape-container ${className}`} 
+      style={{ 
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden' // FIXED: Prevent container overflow
+      }}
+    >
+      {/* FIXED: Fisheye Controls - only show in single mode */}
+      {showFisheyeControls && (
         <div style={{
           position: 'absolute',
           top: '10px',
@@ -259,16 +303,29 @@ const CytoscapeContainer = ({
         </div>
       )}
 
-      {/* Cytoscape Component */}
+      {/* FIXED: Cytoscape Component with proper container constraints */}
       <CytoscapeComponent
         elements={processedElements}
         stylesheet={cytoscapeStylesheet}
         layout={layoutOptions[layout] || layoutOptions.preset}
         style={{
-          ...style,
-          cursor: fisheyeEnabled ? 'crosshair' : 'default'
+          width: '100%',
+          height: '100%',
+          ...style, // Allow style override but maintain size constraints
+          cursor: fisheyeEnabled ? 'crosshair' : 'default',
+          display: 'block' // FIXED: Ensure block display for proper sizing
         }}
         cy={handleCytoscapeReady}
+        // FIXED: Add Cytoscape-specific options for better container handling
+        autoungrabify={false}
+        autolock={false}
+        autounselectify={false}
+        boxSelectionEnabled={false}
+        panningEnabled={true}
+        userPanningEnabled={true}
+        zoomingEnabled={true}
+        userZoomingEnabled={true}
+        wheelSensitivity={0.1}
       />
 
       {/* Element Count Indicator */}
@@ -281,10 +338,31 @@ const CytoscapeContainer = ({
           color: 'white',
           padding: '5px 10px',
           borderRadius: '3px',
-          fontSize: '12px'
+          fontSize: '12px',
+          zIndex: 100
         }}>
           {processedElements.filter(el => !el.data.source).length} nodes, {' '}
           {processedElements.filter(el => el.data.source).length} edges
+        </div>
+      )}
+
+      {/* FIXED: Debug info for comparison mode */}
+      {algorithm && processedElements.length === 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(255, 255, 255, 0.9)',
+          padding: '20px',
+          borderRadius: '5px',
+          border: '1px solid #ddd',
+          textAlign: 'center',
+          fontSize: '14px',
+          color: '#666'
+        }}>
+          <div>No visualization data loaded</div>
+          <small className="text-muted">Algorithm: {algorithm}</small>
         </div>
       )}
     </div>

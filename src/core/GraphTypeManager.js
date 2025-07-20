@@ -32,15 +32,13 @@ class GraphTypeManager {
       name: 'Heterogeneous Graphs',
       description: 'Multi-type networks with different node and edge types',
       fileRequirements: {
-        count: 4,
-        types: ['info', 'link', 'node', 'meta'],
-        extensions: ['.dat'],
-        naming: 'datasetName_type.dat',
+        count: 3,
+        types: ['graph', 'properties', 'path'], 
+        extensions: ['.adj', '.txt', '.dat'], 
         descriptions: {
-          info: 'Graph information and metadata',
-          link: 'Edge/link information',
-          node: 'Node information and attributes',
-          meta: 'Meta-path information'
+          graph: 'Graph edges/adjacency information (combines info + link)',
+          properties: 'Node properties and attributes', 
+          path: 'Meta-path information'
         }
       },
       supportedAlgorithms: ['heterogeneous', 'scar'],

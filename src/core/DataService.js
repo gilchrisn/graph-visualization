@@ -39,20 +39,24 @@ class DataService {
     const cacheKey = `hierarchy_${algorithmId}_${datasetId}_${JSON.stringify(parameters)}`;
     
     if (this.cache.has(cacheKey)) {
+      console.log(`📋 Using cached hierarchy data for ${algorithmId}`);
       return this.cache.get(cacheKey);
     }
 
     try {
-      const params = new URLSearchParams();
-      if (algorithmId !== 'homogeneous') {
-        params.append('processingType', algorithmId);
-      }
+      console.log(`🔄 Loading hierarchy data for ${algorithmId}:`, { datasetId, parameters });
+
+      // FIXED: Build URL without processingType parameter for main algorithms
+      const k = parameters?.k || 25;
+      const url = `${this.apiBaseUrl}/hierarchy/${datasetId}/${k}`;
       
-      const url = `${this.apiBaseUrl}/hierarchy/${datasetId}/${parameters.k}${params.toString() ? '?' + params.toString() : ''}`;
+      console.log(`🌐 Fetching hierarchy: ${url}`);
+      
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       const result = await response.json();
@@ -62,10 +66,11 @@ class DataService {
       }
       
       this.cache.set(cacheKey, result);
+      console.log(`✅ Hierarchy data loaded for ${algorithmId}`);
       return result;
       
     } catch (error) {
-      console.error(`DataService.getHierarchyData failed:`, error);
+      console.error(`❌ DataService.getHierarchyData failed for ${algorithmId}:`, error);
       throw error;
     }
   }
@@ -73,33 +78,77 @@ class DataService {
   /**
    * Get supernode data for visualization
    */
-  async getSupernodeData(algorithmId, datasetId, supernodeId, parameters) {
-    try {
-      const params = new URLSearchParams();
-      if (algorithmId !== 'homogeneous') {
-        params.append('processingType', algorithmId);
-      }
-      
-      const url = `${this.apiBaseUrl}/coordinates/${datasetId}/${parameters.k}/${supernodeId}${params.toString() ? '?' + params.toString() : ''}`;
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to get supernode data');
-      }
-      
-      return result;
-      
-    } catch (error) {
-      console.error(`DataService.getSupernodeData failed:`, error);
-      throw error;
+
+async getSupernodeData(algorithmId, datasetId, supernodeId, parameters) {
+  console.log('🔍 DATASERVICE.getSupernodeData ENTRY:', {
+    algorithmId,
+    datasetId,
+    supernodeId,
+    parameters,
+    timestamp: new Date().toISOString()
+  });
+  
+  const requestId = `req-${Date.now()}`;
+  
+  try {
+    console.log(`🚀 [${requestId}] DataService.getSupernodeData called:`, {
+      algorithmId,
+      datasetId, 
+      supernodeId,
+      parameters,
+      timestamp: new Date().toISOString()
+    });
+
+    const url = `${this.apiBaseUrl}/coordinates/${datasetId}/${algorithmId}/${supernodeId}`;
+    
+  console.log('🔍 ABOUT TO FETCH:', {
+    url,
+    algorithmId,
+    datasetId,
+    supernodeId,
+    fullParameters: parameters
+  });
+    console.log(`🌐 [${requestId}] Making fetch request to: ${url}`);
+    
+    const response = await fetch(url);
+    
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ [${requestId}] HTTP Error:`, {
+        status: response.status,
+        statusText: response.statusText,
+        errorText: errorText,
+        url: url
+      });
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to get supernode data');
+    }
+
+    if (!result.nodes) {
+      console.warn(`⚠️ [${requestId}] No nodes in response, providing empty array`);
+      result.nodes = [];
+    }
+
+    console.log(`✅ [${requestId}] DataService.getSupernodeData completed successfully`);
+    return result;
+    
+  } catch (error) {
+    console.error(`❌ [${requestId}] DataService.getSupernodeData failed:`, {
+      algorithmId,
+      datasetId,
+      supernodeId,
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
+}
 
   /**
    * Get node statistics
@@ -137,9 +186,8 @@ class DataService {
    */
   async runComparison(algorithmConfigs) {
     try {
-      console.log('DataService: Running comparison with configs:', algorithmConfigs);
+      console.log('🔄 DataService: Running comparison with configs:', algorithmConfigs);
       
-      // Get algorithm IDs dynamically
       const algorithmIds = Object.keys(algorithmConfigs);
       
       if (algorithmIds.length !== 2) {
@@ -148,32 +196,21 @@ class DataService {
       
       const [algorithm1Id, algorithm2Id] = algorithmIds;
       
-      // Verify algorithms are compatible for comparison
-      if (!AlgorithmRegistry.areAlgorithmsCompatible(algorithm1Id, algorithm2Id)) {
-        throw new Error(`Algorithms ${algorithm1Id} and ${algorithm2Id} are not compatible for comparison`);
-      }
-      
-      // Get graph type to determine the comparison endpoint and file handling
-      const graphType = AlgorithmRegistry.getGraphTypeForAlgorithm(algorithm1Id);
-      
-      if (!graphType) {
-        throw new Error(`Could not determine graph type for algorithms ${algorithm1Id} and ${algorithm2Id}`);
-      }
-      
-      // Prepare comparison request based on graph type
-      if (graphType.id === 'homogeneous') {
-        return await this._runHomogeneousComparison(algorithmConfigs);
-      } else if (graphType.id === 'heterogeneous') {
+      // FIXED: Handle the legacy heterogeneous vs scar comparison
+      if ((algorithmIds.includes('heterogeneous') && algorithmIds.includes('scar')) ||
+          (algorithmIds.includes('scar') && algorithmIds.includes('heterogeneous'))) {
         return await this._runHeterogeneousComparison(algorithmConfigs);
       } else {
-        throw new Error(`Unsupported graph type for comparison: ${graphType.id}`);
+        // For other combinations, use generic approach
+        throw new Error(`Comparison between ${algorithm1Id} and ${algorithm2Id} not yet supported`);
       }
       
     } catch (error) {
-      console.error(`DataService.runComparison failed:`, error);
+      console.error(`❌ DataService.runComparison failed:`, error);
       throw error;
     }
   }
+
 
   /**
    * Run comparison for homogeneous algorithms
@@ -230,84 +267,61 @@ class DataService {
    * Run comparison for heterogeneous algorithms
    */
   async _runHeterogeneousComparison(algorithmConfigs) {
-    const algorithmIds = Object.keys(algorithmConfigs);
-    const [algorithm1Id, algorithm2Id] = algorithmIds;
-    
     try {
       const formData = new FormData();
       
-      // Add files (same files used for both algorithms in heterogeneous comparison)
-      const files = algorithmConfigs[algorithm1Id].files;
+      // FIXED: Get files from either algorithm config (they're the same)
+      const files = algorithmConfigs.heterogeneous?.files || algorithmConfigs.scar?.files;
+      
+      if (!files) {
+        throw new Error('No files found in algorithm configurations');
+      }
+
+      // Add files to form data
       Object.entries(files).forEach(([key, file]) => {
-        if (file) formData.append(key, file);
+        if (file) {
+          console.log(`📁 Adding file: ${key} = ${file.name}`);
+          formData.append(key, file);
+        }
       });
       
-      // Add algorithm configurations dynamically
-      formData.append('algorithms', JSON.stringify({
-        [algorithm1Id]: algorithmConfigs[algorithm1Id].parameters,
-        [algorithm2Id]: algorithmConfigs[algorithm2Id].parameters
-      }));
-      
-      // Add comparison metadata
-      formData.append('comparisonType', 'heterogeneous');
-      formData.append('algorithm1', algorithm1Id);
-      formData.append('algorithm2', algorithm2Id);
-      
-      // For backward compatibility with existing backend that expects 'heterogeneous' and 'scar'
-      // TODO: Update this when backend is updated to handle generic algorithm pairs
-      if (true) { // Temporary condition to use legacy endpoint
-      // if (algorithmIds.includes('heterogeneous') && algorithmIds.includes('scar')) {
-        // Use legacy endpoint for heterogeneous vs scar
+      // FIXED: Add algorithm parameters in the exact format backend expects
+      formData.append('heterogeneous', JSON.stringify(
+        algorithmConfigs.heterogeneous?.parameters || { k: 25 }
+      ));
+      formData.append('scar', JSON.stringify(
+        algorithmConfigs.scar?.parameters || { k: 25, nk: 10, th: 0.5 }
+      ));
 
-        console.log(algorithmConfigs.heterogeneous.parameters);
-        console.log(algorithmConfigs.scar.parameters);
-        formData.append('heterogeneous', JSON.stringify(algorithmConfigs.heterogeneous.parameters));
-        formData.append('scar', JSON.stringify(algorithmConfigs.scar.parameters));
-        
-        const response = await fetch(`${this.apiBaseUrl}/compare`, {
-          method: 'POST',
-          body: formData,
-          timeout: 300000
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (!result.success) {
-          throw new Error(result.message || 'Comparison failed');
-        }
-        
-        return result;
-      } else {
-        // Use new generic endpoint
-        const response = await fetch(`${this.apiBaseUrl}/compare-heterogeneous`, {
-          method: 'POST',
-          body: formData,
-          timeout: 300000
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (!result.success) {
-          throw new Error(result.message || 'Heterogeneous comparison failed');
-        }
-        
-        return this._normalizeComparisonResult(result, algorithm1Id, algorithm2Id);
+      console.log('🚀 Sending comparison request to /api/compare');
+      
+      const response = await fetch(`${this.apiBaseUrl}/compare`, {
+        method: 'POST',
+        body: formData,
+        timeout: 300000 // 5 minutes
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
+      const result = await response.json();
+      console.log('📥 Raw comparison response:', result);
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Comparison failed');
+      }
+
+      // FIXED: The backend returns the correct structure, just pass it through
+      console.log('✅ Comparison completed successfully');
+      return result; // Don't normalize, backend structure is correct
+      
     } catch (error) {
-      console.error(`Heterogeneous comparison failed:`, error);
+      console.error(`❌ Heterogeneous comparison failed:`, error);
       throw error;
     }
   }
-
   /**
    * Normalize comparison result to have consistent structure
    */
@@ -373,10 +387,9 @@ class DataService {
   async _processHeterogeneous(files, parameters) {
     // Upload step
     const formData = new FormData();
-    formData.append('infoFile', files.infoFile);
-    formData.append('linkFile', files.linkFile);
-    formData.append('nodeFile', files.nodeFile);
-    formData.append('metaFile', files.metaFile);
+    formData.append('graphFile', files.graphFile); 
+    formData.append('propertiesFile', files.propertiesFile); 
+    formData.append('pathFile', files.pathFile);
     formData.append('k', parameters.k);
     
     const uploadResponse = await fetch(`${this.apiBaseUrl}/upload-heterogeneous`, {
@@ -418,10 +431,9 @@ class DataService {
   async _processScar(files, parameters) {
     // Upload step
     const formData = new FormData();
-    formData.append('infoFile', files.infoFile);
-    formData.append('linkFile', files.linkFile);
-    formData.append('nodeFile', files.nodeFile);
-    formData.append('metaFile', files.metaFile);
+    formData.append('graphFile', files.graphFile);
+    formData.append('propertiesFile', files.propertiesFile);
+    formData.append('pathFile', files.pathFile);
     formData.append('k', parameters.k);
     formData.append('nk', parameters.nk);
     formData.append('th', parameters.th);
@@ -466,9 +478,65 @@ class DataService {
     return processResult;
   }
 
+  // Add this method to DataService.js - don't touch any existing methods
+async reprocessWithNewParameters(algorithmId, existingDatasetId, newParameters) {
+  try {
+    switch (algorithmId) {
+      case 'scar':
+        return await this._reprocessScarOnly(existingDatasetId, newParameters);
+      case 'heterogeneous':
+        return await this._reprocessHeterogeneousOnly(existingDatasetId, newParameters);
+      default:
+        throw new Error(`Reprocessing not supported for ${algorithmId}`);
+    }
+  } catch (error) {
+    console.error(`Reprocessing failed:`, error);
+    throw error;
+  }
+}
+
+async _reprocessScarOnly(datasetId, parameters) {
+  // Skip upload, go straight to process
+  const processResponse = await fetch(`${this.apiBaseUrl}/process-scar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      datasetId: datasetId,
+      k: parameters.k,
+      nk: parameters.nk,
+      th: parameters.th
+    })
+  });
+  
+  if (!processResponse.ok) {
+    throw new Error(`Processing failed: ${processResponse.statusText}`);
+  }
+  
+  return await processResponse.json();
+}
+
+async _reprocessHeterogeneousOnly(datasetId, parameters) {
+  // Same pattern for heterogeneous
+  const processResponse = await fetch(`${this.apiBaseUrl}/process-heterogeneous`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      datasetId: datasetId,
+      k: parameters.k
+    })
+  });
+  
+  if (!processResponse.ok) {
+    throw new Error(`Processing failed: ${processResponse.statusText}`);
+  }
+  
+  return await processResponse.json();
+}
+
   // Utility methods
   clearCache() {
     this.cache.clear();
+    console.log('🗑️ DataService cache cleared');
   }
 
   getCacheStats() {
